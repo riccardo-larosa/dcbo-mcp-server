@@ -1,0 +1,171 @@
+/**
+ * Express server with security middleware
+ * Exposes MCP JSON-RPC endpoint at /mcp
+ */
+
+import express, { Request, Response, NextFunction } from 'express';
+import { appConfig } from './config.js';
+import { handleMcpRequest } from './mcp.js';
+
+const app = express();
+
+// Parse JSON bodies
+app.use(express.json());
+
+/**
+ * Security middleware: validate Origin header
+ */
+function validateOrigin(req: Request, res: Response, next: NextFunction): void {
+  const origin = req.headers.origin;
+
+  if (!origin) {
+    res.status(403).json({
+      error: 'Forbidden',
+      message: 'Origin header is required',
+    });
+    return;
+  }
+
+  if (!appConfig.server.allowedOrigins.includes(origin)) {
+    console.warn('[Security] Blocked request from unauthorized origin:', origin);
+    res.status(403).json({
+      error: 'Forbidden',
+      message: 'Origin not allowed',
+    });
+    return;
+  }
+
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  next();
+}
+
+/**
+ * Security middleware: validate API key
+ */
+function validateApiKey(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Authorization header is required',
+    });
+    return;
+  }
+
+  // Expected format: "MCP-Key <key>"
+  const match = authHeader.match(/^MCP-Key\s+(.+)$/i);
+  if (!match) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid Authorization format. Expected: MCP-Key <key>',
+    });
+    return;
+  }
+
+  const providedKey = match[1];
+  if (providedKey !== appConfig.server.mcpApiKey) {
+    console.warn('[Security] Invalid API key attempt');
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid API key',
+    });
+    return;
+  }
+
+  next();
+}
+
+/**
+ * Health check endpoint
+ */
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * OPTIONS handler for CORS preflight
+ */
+app.options('/mcp', validateOrigin, (_req: Request, res: Response) => {
+  res.status(204).end();
+});
+
+/**
+ * MCP JSON-RPC endpoint
+ */
+app.post('/mcp', validateOrigin, validateApiKey, async (req: Request, res: Response) => {
+  try {
+    const request = req.body;
+
+    // Validate JSON-RPC structure
+    if (!request || typeof request !== 'object' || !request.method) {
+      res.status(400).json({
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32600,
+          message: 'Invalid Request: missing method field',
+        },
+      });
+      return;
+    }
+
+    // Handle the request
+    const response = await handleMcpRequest(request);
+
+    res.json(response);
+  } catch (error) {
+    console.error('[Server] Unexpected error:', error);
+
+    res.status(500).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: {
+        code: -32603,
+        message: 'Internal server error',
+      },
+    });
+  }
+});
+
+/**
+ * 404 handler
+ */
+app.use((_req: Request, res: Response) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: 'Endpoint not found. Try POST /mcp',
+  });
+});
+
+/**
+ * Global error handler
+ */
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[Server] Global error handler:', err);
+
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: err.message,
+  });
+});
+
+/**
+ * Start server
+ */
+const port = appConfig.server.port;
+
+app.listen(port, () => {
+  console.log('='.repeat(60));
+  console.log(`[Server] Docebo MCP Server running on port ${port}`);
+  console.log(`[Server] MCP endpoint: http://localhost:${port}/mcp`);
+  console.log(`[Server] Health check: http://localhost:${port}/health`);
+  console.log('='.repeat(60));
+});
