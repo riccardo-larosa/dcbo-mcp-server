@@ -13,6 +13,8 @@ interface Config {
     baseUrl: string;
     clientId: string;
     clientSecret: string;
+    username: string;
+    password: string;
   };
   server: {
     port: number;
@@ -27,6 +29,8 @@ function validateEnv(): Config {
     'DOCEBO_BASE_URL',
     'DOCEBO_CLIENT_ID',
     'DOCEBO_CLIENT_SECRET',
+    'DOCEBO_USERNAME',
+    'DOCEBO_PASSWORD',
     'MCP_API_KEY',
   ];
 
@@ -54,6 +58,8 @@ function validateEnv(): Config {
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
       clientId: process.env.DOCEBO_CLIENT_ID!,
       clientSecret: process.env.DOCEBO_CLIENT_SECRET!,
+      username: process.env.DOCEBO_USERNAME!,
+      password: process.env.DOCEBO_PASSWORD!,
     },
     server: {
       port: parseInt(process.env.PORT || '3000', 10),

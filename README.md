@@ -4,7 +4,7 @@ Minimal MCP (Model Context Protocol) server that exposes Docebo LMS API through 
 
 ## Features
 
-- **OAuth2 Authentication**: Automatic token management with in-memory caching
+- **OAuth2 Authentication**: Password grant flow with automatic token management and refresh token support
 - **Secure API**: API key + Origin validation
 - **Streamable HTTP Transport**: JSON-RPC over HTTP/HTTPS
 - **Single Tool**: `docebo.list_users` - List and search Docebo users
@@ -13,7 +13,8 @@ Minimal MCP (Model Context Protocol) server that exposes Docebo LMS API through 
 
 - Node.js 22.x or later
 - Docebo LMS instance with API access
-- OAuth2 client credentials (client_id + client_secret)
+- OAuth2 app credentials (client_id + client_secret)
+- Docebo admin user credentials (username + password)
 
 ## Installation
 
@@ -35,6 +36,8 @@ cp .env.example .env
 DOCEBO_BASE_URL=https://your-tenant.docebosaas.com
 DOCEBO_CLIENT_ID=your_client_id
 DOCEBO_CLIENT_SECRET=your_client_secret
+DOCEBO_USERNAME=your_admin_username
+DOCEBO_PASSWORD=your_admin_password
 MCP_API_KEY=your-generated-api-key-here
 PORT=3000
 ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
@@ -42,6 +45,8 @@ ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
 # For local development with MCP Inspector
 ALLOW_LOCAL_DEV=true
 ```
+
+**Important**: The Docebo username and password should be for an admin user with API access permissions. The OAuth2 password grant type is required for the `/manage/v1/*` API endpoints.
 
 ### Generating an API Key
 

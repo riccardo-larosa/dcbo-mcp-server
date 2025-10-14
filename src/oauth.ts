@@ -1,6 +1,6 @@
 /**
  * OAuth2 token manager for Docebo
- * Handles client-credentials flow with in-memory caching
+ * Handles password grant flow with in-memory caching and refresh tokens
  */
 
 import { appConfig } from './config.js';
@@ -9,10 +9,12 @@ interface TokenResponse {
   access_token: string;
   expires_in: number;
   token_type: string;
+  refresh_token?: string;
 }
 
 interface CachedToken {
   accessToken: string;
+  refreshToken?: string;
   expiresAt: number; // Unix timestamp in milliseconds
 }
 
@@ -45,15 +47,18 @@ class TokenManager {
   }
 
   /**
-   * Fetch a new token from Docebo OAuth2 endpoint
+   * Fetch a new token from Docebo OAuth2 endpoint using password grant
    */
   private async fetchNewToken(): Promise<string> {
     const url = `${appConfig.docebo.baseUrl}/oauth2/token`;
 
     const body = new URLSearchParams({
-      grant_type: 'client_credentials',
+      grant_type: 'password',
       client_id: appConfig.docebo.clientId,
       client_secret: appConfig.docebo.clientSecret,
+      username: appConfig.docebo.username,
+      password: appConfig.docebo.password,
+      scope: 'api',
     });
 
     console.log('[OAuth] Fetching new token from', url);
@@ -75,10 +80,11 @@ class TokenManager {
 
     const data = await response.json() as TokenResponse;
 
-    // Cache with expiry
+    // Cache with expiry and refresh token
     const expiresAt = Date.now() + data.expires_in * 1000;
     this.cache = {
       accessToken: data.access_token,
+      refreshToken: data.refresh_token,
       expiresAt,
     };
 
