@@ -18,6 +18,20 @@ app.use(express.json());
 function validateOrigin(req: Request, res: Response, next: NextFunction): void {
   const origin = req.headers.origin;
 
+  // In local dev mode, skip origin validation (for MCP Inspector, etc.)
+  if (appConfig.server.allowLocalDev) {
+    console.log('[Security] Local dev mode - allowing request from:', origin || 'no-origin');
+
+    // Set permissive CORS headers for local dev
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    next();
+    return;
+  }
+
+  // Production mode: strict origin validation
   if (!origin) {
     res.status(403).json({
       error: 'Forbidden',

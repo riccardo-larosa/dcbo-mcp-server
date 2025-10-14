@@ -18,6 +18,7 @@ interface Config {
     port: number;
     mcpApiKey: string;
     allowedOrigins: string[];
+    allowLocalDev: boolean;
   };
 }
 
@@ -45,6 +46,9 @@ function validateEnv(): Config {
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
     : ['https://chat.openai.com', 'https://claude.ai'];
 
+  // Allow disabling origin check for local development (MCP Inspector, etc.)
+  const allowLocalDev = process.env.ALLOW_LOCAL_DEV === 'true';
+
   return {
     docebo: {
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
@@ -55,6 +59,7 @@ function validateEnv(): Config {
       port: parseInt(process.env.PORT || '3000', 10),
       mcpApiKey: process.env.MCP_API_KEY!,
       allowedOrigins,
+      allowLocalDev,
     },
   };
 }
@@ -66,4 +71,9 @@ console.log('[Config] Loaded configuration:', {
   doceboBaseUrl: appConfig.docebo.baseUrl,
   serverPort: appConfig.server.port,
   allowedOrigins: appConfig.server.allowedOrigins,
+  allowLocalDev: appConfig.server.allowLocalDev,
 });
+
+if (appConfig.server.allowLocalDev) {
+  console.warn('[Config] ⚠️  Local dev mode enabled - Origin validation relaxed!');
+}

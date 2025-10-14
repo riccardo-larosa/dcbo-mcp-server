@@ -47,7 +47,7 @@ export async function listUsers(params: ListUsersParams = {}): Promise<ListUsers
   if (params.sort_dir) queryParams.set('sort_dir', params.sort_dir);
   if (params.search_text) queryParams.set('search_text', params.search_text);
 
-  const url = `${appConfig.docebo.baseUrl}/manage/v1/users?${queryParams.toString()}`;
+  const url = `${appConfig.docebo.baseUrl}/manage/v1/user?${queryParams.toString()}`;
 
   console.log('[Docebo] Fetching users from', url);
 

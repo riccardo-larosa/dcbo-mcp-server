@@ -38,6 +38,9 @@ DOCEBO_CLIENT_SECRET=your_client_secret
 MCP_API_KEY=your-generated-api-key-here
 PORT=3000
 ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
+
+# For local development with MCP Inspector
+ALLOW_LOCAL_DEV=true
 ```
 
 ### Generating an API Key
@@ -54,6 +57,30 @@ Start the server in watch mode:
 ```bash
 npm run dev
 ```
+
+### Using with MCP Inspector
+
+The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers locally. To use it with this server:
+
+1. Enable local dev mode in your `.env`:
+   ```env
+   ALLOW_LOCAL_DEV=true
+   ```
+
+2. Start the server:
+   ```bash
+   npm run dev
+   ```
+
+3. Run the MCP Inspector:
+   ```bash
+   npx @modelcontextprotocol/inspector http://localhost:3000/mcp
+   ```
+
+4. In the Inspector UI, configure the API key:
+   - Add header: `Authorization: MCP-Key <your-api-key>`
+
+**Important**: Always set `ALLOW_LOCAL_DEV=false` in production! This setting disables origin validation and should only be used for local development.
 
 ## Production
 

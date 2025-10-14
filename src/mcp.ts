@@ -114,7 +114,7 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpc
           jsonrpc: '2.0',
           id: requestId,
           result: {
-            protocolVersion: '0.1.0',
+            protocolVersion: '2025-03-26',
             serverInfo: {
               name: 'docebo-mcp-server',
               version: '1.0.0',
