@@ -1,10 +1,9 @@
 /**
  * Docebo API client
- * Handles authenticated API calls
+ * Handles authenticated API calls using client-provided tokens
  */
 
 import { appConfig } from './config.js';
-import { tokenManager } from './oauth.js';
 
 export interface DoceboUser {
   user_id: number;
@@ -36,9 +35,7 @@ export interface ListUsersParams {
 /**
  * List users from Docebo
  */
-export async function listUsers(params: ListUsersParams = {}): Promise<ListUsersResponse> {
-  const token = await tokenManager.getToken();
-
+export async function listUsers(params: ListUsersParams = {}, bearerToken: string): Promise<ListUsersResponse> {
   // Build query string
   const queryParams = new URLSearchParams();
   if (params.page) queryParams.set('page', params.page.toString());
@@ -54,7 +51,7 @@ export async function listUsers(params: ListUsersParams = {}): Promise<ListUsers
   const response = await fetch(url, {
     method: 'GET',
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${bearerToken}`,
       Accept: 'application/json',
     },
   });

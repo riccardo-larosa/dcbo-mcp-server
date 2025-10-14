@@ -58,9 +58,10 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
 }
 
 /**
- * Security middleware: validate API key
+ * Security middleware: extract Bearer token from Authorization header
+ * Token will be validated by Docebo API when making requests
  */
-function validateApiKey(req: Request, res: Response, next: NextFunction): void {
+function extractBearerToken(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -71,25 +72,18 @@ function validateApiKey(req: Request, res: Response, next: NextFunction): void {
     return;
   }
 
-  // Expected format: "MCP-Key <key>"
-  const match = authHeader.match(/^MCP-Key\s+(.+)$/i);
+  // Expected format: "Bearer <token>"
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
     res.status(401).json({
       error: 'Unauthorized',
-      message: 'Invalid Authorization format. Expected: MCP-Key <key>',
+      message: 'Invalid Authorization format. Expected: Bearer <token>',
     });
     return;
   }
 
-  const providedKey = match[1];
-  if (providedKey !== appConfig.server.mcpApiKey) {
-    console.warn('[Security] Invalid API key attempt');
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Invalid API key',
-    });
-    return;
-  }
+  // Store the token in res.locals for use by handlers
+  res.locals.bearerToken = match[1];
 
   next();
 }
@@ -114,7 +108,7 @@ app.options('/mcp', validateOrigin, (_req: Request, res: Response) => {
 /**
  * MCP JSON-RPC endpoint
  */
-app.post('/mcp', validateOrigin, validateApiKey, async (req: Request, res: Response) => {
+app.post('/mcp', validateOrigin, extractBearerToken, async (req: Request, res: Response) => {
   try {
     const request = req.body;
 
@@ -131,8 +125,8 @@ app.post('/mcp', validateOrigin, validateApiKey, async (req: Request, res: Respo
       return;
     }
 
-    // Handle the request
-    const response = await handleMcpRequest(request);
+    // Handle the request with the bearer token
+    const response = await handleMcpRequest(request, res.locals.bearerToken);
 
     res.json(response);
   } catch (error) {

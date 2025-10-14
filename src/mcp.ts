@@ -90,7 +90,7 @@ const TOOLS: ToolDefinition[] = [
 /**
  * Handle MCP JSON-RPC requests
  */
-export async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+export async function handleMcpRequest(request: JsonRpcRequest, bearerToken: string): Promise<JsonRpcResponse> {
   const requestId = request.id ?? null;
 
   // Validate JSON-RPC version
@@ -151,7 +151,7 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpc
         // Route to tool handler
         if (params.name === 'docebo.list_users') {
           const toolArgs = (params.arguments as ListUsersParams) || {};
-          const result = await listUsers(toolArgs);
+          const result = await listUsers(toolArgs, bearerToken);
 
           return {
             jsonrpc: '2.0',

@@ -11,14 +11,9 @@ config();
 interface Config {
   docebo: {
     baseUrl: string;
-    clientId: string;
-    clientSecret: string;
-    username: string;
-    password: string;
   };
   server: {
     port: number;
-    mcpApiKey: string;
     allowedOrigins: string[];
     allowLocalDev: boolean;
   };
@@ -27,11 +22,6 @@ interface Config {
 function validateEnv(): Config {
   const required = [
     'DOCEBO_BASE_URL',
-    'DOCEBO_CLIENT_ID',
-    'DOCEBO_CLIENT_SECRET',
-    'DOCEBO_USERNAME',
-    'DOCEBO_PASSWORD',
-    'MCP_API_KEY',
   ];
 
   const missing = required.filter((key) => !process.env[key]);
@@ -56,14 +46,9 @@ function validateEnv(): Config {
   return {
     docebo: {
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
-      clientId: process.env.DOCEBO_CLIENT_ID!,
-      clientSecret: process.env.DOCEBO_CLIENT_SECRET!,
-      username: process.env.DOCEBO_USERNAME!,
-      password: process.env.DOCEBO_PASSWORD!,
     },
     server: {
       port: parseInt(process.env.PORT || '3000', 10),
-      mcpApiKey: process.env.MCP_API_KEY!,
       allowedOrigins,
       allowLocalDev,
     },
