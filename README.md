@@ -47,9 +47,43 @@ ALLOW_LOCAL_DEV=true
 
 MCP clients (like Claude Desktop, ChatGPT, or custom clients) must be configured to handle OAuth2 authentication with Docebo.
 
+### OAuth2 Discovery
+
+The MCP server implements **RFC 9728 (OAuth 2.0 Protected Resource Metadata)** for automatic OAuth2 discovery. MCP clients can discover the authorization server by fetching:
+
+```
+https://your-server.com/.well-known/oauth-authorization-server
+```
+
+This returns:
+```json
+{
+  "issuer": "https://your-tenant.docebosaas.com",
+  "authorization_endpoint": "https://your-tenant.docebosaas.com/oauth2/authorize",
+  "token_endpoint": "https://your-tenant.docebosaas.com/oauth2/token",
+  "scopes_supported": ["api"],
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "password", "refresh_token"],
+  "code_challenge_methods_supported": ["S256"]
+}
+```
+
 ### Example: Claude Desktop Configuration
 
-Add to your Claude Desktop MCP settings:
+If your MCP client supports automatic discovery, you can simply configure:
+
+```json
+{
+  "mcpServers": {
+    "docebo": {
+      "url": "https://your-server.com/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}
+```
+
+Or configure OAuth2 explicitly:
 
 ```json
 {

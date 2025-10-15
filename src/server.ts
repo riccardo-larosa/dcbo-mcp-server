@@ -99,6 +99,23 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
+ * OAuth2 Protected Resource Metadata (RFC 9728)
+ * Allows MCP clients to discover the authorization server
+ */
+app.get('/.well-known/oauth-authorization-server', (_req: Request, res: Response) => {
+  res.json({
+    issuer: appConfig.docebo.baseUrl,
+    authorization_endpoint: `${appConfig.docebo.baseUrl}/oauth2/authorize`,
+    token_endpoint: `${appConfig.docebo.baseUrl}/oauth2/token`,
+    scopes_supported: ['api'],
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
+    code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+  });
+});
+
+/**
  * OPTIONS handler for CORS preflight
  */
 app.options('/mcp', validateOrigin, (_req: Request, res: Response) => {
