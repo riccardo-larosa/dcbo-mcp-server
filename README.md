@@ -24,6 +24,15 @@ npm install
 
 ## Server Configuration
 
+### Multi-Tenant Support
+
+This server supports multi-tenant deployments on Docebo SaaS infrastructure:
+
+- **Production**: Deploy at `<tenantId>.docebosaas.com/mcp` - OAuth2 endpoints are automatically detected from the hostname
+- **Development**: Run on `localhost` - OAuth2 endpoints are configured via `.env` file
+
+### Configuration Steps
+
 1. Copy the example environment file:
 
 ```bash
@@ -36,7 +45,8 @@ cp .env.example .env
 # Docebo API base URL
 DOCEBO_BASE_URL=https://your-tenant.docebosaas.com
 
-# OAuth2 endpoints (for client discovery)
+# OAuth2 endpoints (ONLY required for localhost development)
+# In production (*.docebosaas.com), endpoints are dynamically determined from the hostname
 OAUTH_AUTHORIZATION_URL=https://your-tenant.docebosaas.com/oauth2/authorize
 OAUTH_TOKEN_URL=https://your-tenant.docebosaas.com/oauth2/token
 
@@ -47,11 +57,11 @@ ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
 ALLOW_LOCAL_DEV=true
 ```
 
-**Note**:
+**Configuration Notes**:
 - The server is stateless and doesn't store any credentials
-- OAuth2 endpoints are configured server-side and exposed via the discovery endpoint
-- MCP clients discover these endpoints automatically from `/.well-known/oauth-authorization-server`
-- This allows you to use any OAuth2 provider (not just Docebo)
+- **Production deployments** (`*.docebosaas.com`): OAuth2 endpoints are automatically derived from the hostname - no need to set `OAUTH_AUTHORIZATION_URL` or `OAUTH_TOKEN_URL`
+- **Local development** (`localhost`): You must specify `OAUTH_AUTHORIZATION_URL` and `OAUTH_TOKEN_URL` in `.env`
+- MCP clients discover OAuth2 endpoints automatically from `/.well-known/oauth-authorization-server`
 
 ## Client Configuration
 
@@ -62,21 +72,26 @@ MCP clients (like Claude Desktop, ChatGPT, or custom clients) must be configured
 The MCP server implements **RFC 9728 (OAuth 2.0 Protected Resource Metadata)** for automatic OAuth2 discovery. MCP clients can discover the authorization server by fetching:
 
 ```
-https://your-server.com/.well-known/oauth-authorization-server
+https://<tenantId>.docebosaas.com/mcp/.well-known/oauth-authorization-server
 ```
 
-This returns:
+**Multi-Tenant Example:**
+
+For a deployment at `https://acme.docebosaas.com/mcp`, the discovery endpoint returns:
+
 ```json
 {
-  "issuer": "https://your-tenant.docebosaas.com",
-  "authorization_endpoint": "https://your-tenant.docebosaas.com/oauth2/authorize",
-  "token_endpoint": "https://your-tenant.docebosaas.com/oauth2/token",
+  "issuer": "https://acme.docebosaas.com/oauth2",
+  "authorization_endpoint": "https://acme.docebosaas.com/oauth2/authorize",
+  "token_endpoint": "https://acme.docebosaas.com/oauth2/token",
   "scopes_supported": ["api"],
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "password", "refresh_token"],
   "code_challenge_methods_supported": ["S256"]
 }
 ```
+
+Each tenant automatically gets their own OAuth2 endpoints based on their subdomain. No configuration required!
 
 ### Example: Claude Desktop Configuration
 
@@ -86,24 +101,26 @@ If your MCP client supports automatic discovery, you can simply configure:
 {
   "mcpServers": {
     "docebo": {
-      "url": "https://your-server.com/mcp",
+      "url": "https://acme.docebosaas.com/mcp",
       "transport": "streamable-http"
     }
   }
 }
 ```
 
-Or configure OAuth2 explicitly:
+The client will automatically discover OAuth2 endpoints from the `.well-known` endpoint.
+
+Alternatively, configure OAuth2 explicitly for each tenant:
 
 ```json
 {
   "mcpServers": {
     "docebo": {
-      "url": "https://your-server.com/mcp",
+      "url": "https://acme.docebosaas.com/mcp",
       "transport": "streamable-http",
       "oauth": {
-        "authorizationUrl": "https://your-tenant.docebosaas.com/oauth2/authorize",
-        "tokenUrl": "https://your-tenant.docebosaas.com/oauth2/token",
+        "authorizationUrl": "https://acme.docebosaas.com/oauth2/authorize",
+        "tokenUrl": "https://acme.docebosaas.com/oauth2/token",
         "clientId": "your-docebo-oauth-client-id",
         "clientSecret": "your-docebo-oauth-client-secret",
         "scopes": ["api"]
@@ -170,12 +187,26 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool
 
 ## Production
 
+### Multi-Tenant Deployment
+
+This server is designed for deployment at `<tenantId>.docebosaas.com/mcp`. Each tenant automatically gets their own OAuth2 endpoints without any configuration.
+
+**Example deployments:**
+- `https://acme.docebosaas.com/mcp` → OAuth2 at `https://acme.docebosaas.com/oauth2/*`
+- `https://widgets-inc.docebosaas.com/mcp` → OAuth2 at `https://widgets-inc.docebosaas.com/oauth2/*`
+
 Build and run:
 
 ```bash
 npm run build
 npm start
 ```
+
+**Production checklist:**
+- ✅ Set `ALLOW_LOCAL_DEV=false` (disable origin validation bypass)
+- ✅ Configure `ALLOWED_ORIGINS` with your MCP client origins
+- ✅ Deploy at `<tenantId>.docebosaas.com/mcp`
+- ✅ Remove or leave empty `OAUTH_AUTHORIZATION_URL` and `OAUTH_TOKEN_URL` (not needed in production)
 
 ## Testing
 
@@ -337,16 +368,33 @@ Lists users from Docebo LMS with optional filtering and pagination.
 ```
 dcbo-mcp-server/
 ├── src/
-│   ├── config.ts       # Environment validation
+│   ├── config.ts       # Environment validation & dynamic endpoint detection
 │   ├── oauth.ts        # Token management
 │   ├── docebo.ts       # Docebo API client
 │   ├── mcp.ts          # JSON-RPC handler
-│   └── server.ts       # Express app
+│   └── server.ts       # Express app with OAuth2 discovery
 ├── .env.example
+├── ENHANCEMENTS.md     # Future enhancement ideas
 ├── package.json
 ├── tsconfig.json
 └── README.md
 ```
+
+## How It Works
+
+### Multi-Tenant OAuth2 Detection
+
+The server automatically detects which tenant it's serving based on the `Host` header:
+
+1. Client requests: `https://acme.docebosaas.com/mcp/.well-known/oauth-authorization-server`
+2. Server extracts hostname: `acme.docebosaas.com`
+3. Server constructs tenant-specific endpoints:
+   - `issuer`: `https://acme.docebosaas.com/oauth2`
+   - `authorization_endpoint`: `https://acme.docebosaas.com/oauth2/authorize`
+   - `token_endpoint`: `https://acme.docebosaas.com/oauth2/token`
+4. Returns discovery metadata with tenant-specific URLs
+
+For localhost development, the server falls back to `.env` configuration.
 
 ## License
 

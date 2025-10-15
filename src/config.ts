@@ -24,11 +24,9 @@ interface Config {
 }
 
 function validateEnv(): Config {
-  const required = [
-    'DOCEBO_BASE_URL',
-    'OAUTH_AUTHORIZATION_URL',
-    'OAUTH_TOKEN_URL',
-  ];
+  // Only DOCEBO_BASE_URL is required
+  // OAuth URLs are optional and only used in local dev mode
+  const required = ['DOCEBO_BASE_URL'];
 
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
@@ -37,19 +35,19 @@ function validateEnv(): Config {
 
   // Validate BASE_URL format
   const baseUrl = process.env.DOCEBO_BASE_URL!;
-  if (!baseUrl.startsWith('https://')) {
-    throw new Error('DOCEBO_BASE_URL must use HTTPS');
+  if (!baseUrl.startsWith('https://') && !baseUrl.startsWith('http://localhost')) {
+    throw new Error('DOCEBO_BASE_URL must use HTTPS (or http://localhost for dev)');
   }
 
-  // Validate OAuth URLs
-  const authUrl = process.env.OAUTH_AUTHORIZATION_URL!;
-  const tokenUrl = process.env.OAUTH_TOKEN_URL!;
+  // OAuth URLs are optional - used only for local development
+  const authUrl = process.env.OAUTH_AUTHORIZATION_URL || '';
+  const tokenUrl = process.env.OAUTH_TOKEN_URL || '';
 
-  if (!authUrl.startsWith('https://') && !authUrl.startsWith('http://localhost')) {
+  if (authUrl && !authUrl.startsWith('https://') && !authUrl.startsWith('http://localhost')) {
     throw new Error('OAUTH_AUTHORIZATION_URL must use HTTPS (or http://localhost for dev)');
   }
 
-  if (!tokenUrl.startsWith('https://') && !tokenUrl.startsWith('http://localhost')) {
+  if (tokenUrl && !tokenUrl.startsWith('https://') && !tokenUrl.startsWith('http://localhost')) {
     throw new Error('OAUTH_TOKEN_URL must use HTTPS (or http://localhost for dev)');
   }
 
@@ -79,11 +77,64 @@ function validateEnv(): Config {
 
 export const appConfig = validateEnv();
 
+/**
+ * Get OAuth endpoints based on hostname
+ * For production (*.docebosaas.com), derives endpoints from hostname
+ * For localhost, uses .env values
+ */
+export interface OAuthEndpoints {
+  issuer: string;
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+}
+
+export function getOAuthEndpoints(hostname: string): OAuthEndpoints {
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
+
+  if (isLocalhost) {
+    // Local development: use .env values
+    if (!appConfig.oauth.authorizationUrl || !appConfig.oauth.tokenUrl) {
+      throw new Error('OAUTH_AUTHORIZATION_URL and OAUTH_TOKEN_URL must be set for localhost development');
+    }
+
+    return {
+      issuer: appConfig.docebo.baseUrl + '/oauth2',
+      authorizationEndpoint: appConfig.oauth.authorizationUrl,
+      tokenEndpoint: appConfig.oauth.tokenUrl,
+    };
+  }
+
+  // Production: extract tenant from hostname and construct URLs
+  // Expected format: <tenantId>.docebosaas.com or <tenantId>.docebosaas.com:port
+  const match = hostname.match(/^([^.]+)\.docebosaas\.com(?::\d+)?$/);
+
+  if (match) {
+    const tenantId = match[1];
+    const baseUrl = `https://${tenantId}.docebosaas.com`;
+
+    return {
+      issuer: `${baseUrl}/oauth2`,
+      authorizationEndpoint: `${baseUrl}/oauth2/authorize`,
+      tokenEndpoint: `${baseUrl}/oauth2/token`,
+    };
+  }
+
+  // Fallback: use the hostname as-is (assumes it's a valid Docebo domain)
+  const protocol = hostname.startsWith('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${hostname}`;
+
+  return {
+    issuer: `${baseUrl}/oauth2`,
+    authorizationEndpoint: `${baseUrl}/oauth2/authorize`,
+    tokenEndpoint: `${baseUrl}/oauth2/token`,
+  };
+}
+
 // Log loaded config (without secrets)
 console.log('[Config] Loaded configuration:', {
   doceboBaseUrl: appConfig.docebo.baseUrl,
-  oauthAuthorizationUrl: appConfig.oauth.authorizationUrl,
-  oauthTokenUrl: appConfig.oauth.tokenUrl,
+  oauthAuthorizationUrl: appConfig.oauth.authorizationUrl || '(dynamic - based on hostname)',
+  oauthTokenUrl: appConfig.oauth.tokenUrl || '(dynamic - based on hostname)',
   serverPort: appConfig.server.port,
   allowedOrigins: appConfig.server.allowedOrigins,
   allowLocalDev: appConfig.server.allowLocalDev,

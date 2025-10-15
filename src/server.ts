@@ -4,7 +4,7 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { appConfig } from './config.js';
+import { appConfig, getOAuthEndpoints } from './config.js';
 import { handleMcpRequest } from './mcp.js';
 
 const app = express();
@@ -101,18 +101,36 @@ app.get('/health', (_req: Request, res: Response) => {
 /**
  * OAuth2 Protected Resource Metadata (RFC 9728)
  * Allows MCP clients to discover the authorization server
+ *
+ * Dynamically returns tenant-specific endpoints based on the Host header:
+ * - For *.docebosaas.com: returns endpoints at https://<tenant>.docebosaas.com/oauth2
+ * - For localhost: uses .env configuration
  */
-app.get('/.well-known/oauth-authorization-server', (_req: Request, res: Response) => {
-  res.json({
-    issuer: appConfig.docebo.baseUrl,
-    authorization_endpoint: appConfig.oauth.authorizationUrl,
-    token_endpoint: appConfig.oauth.tokenUrl,
-    scopes_supported: ['api'],
-    response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
-    code_challenge_methods_supported: ['S256'],
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-  });
+app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  // Extract hostname from Host header
+  const host = req.headers.host || 'localhost';
+  const hostname = host.split(':')[0]; // Remove port if present
+
+  try {
+    const endpoints = getOAuthEndpoints(hostname);
+
+    res.json({
+      issuer: endpoints.issuer,
+      authorization_endpoint: endpoints.authorizationEndpoint,
+      token_endpoint: endpoints.tokenEndpoint,
+      scopes_supported: ['api'],
+      response_types_supported: ['code'],
+      grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
+      code_challenge_methods_supported: ['S256'],
+      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+    });
+  } catch (error) {
+    console.error('[OAuth Discovery] Error getting endpoints:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error instanceof Error ? error.message : 'Failed to determine OAuth endpoints',
+    });
+  }
 });
 
 /**
