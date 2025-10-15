@@ -4,6 +4,8 @@ Minimal MCP (Model Context Protocol) server that exposes Docebo LMS API through 
 
 ## Features
 
+- **MCP 2025-06-18 Compliant**: Implements RFC 9728 (Protected Resource Metadata) and RFC 8414 (Authorization Server Metadata)
+- **Multi-Tenant OAuth2**: Automatic tenant detection from hostname with zero configuration
 - **Client-Side OAuth2**: MCP clients handle OAuth2 authentication with Docebo
 - **Stateless Server**: No credentials stored on server, accepts client Bearer tokens
 - **Secure API**: Origin validation for production security
@@ -69,15 +71,38 @@ MCP clients (like Claude Desktop, ChatGPT, or custom clients) must be configured
 
 ### OAuth2 Discovery
 
-The MCP server implements **RFC 9728 (OAuth 2.0 Protected Resource Metadata)** for automatic OAuth2 discovery. MCP clients can discover the authorization server by fetching:
+The MCP server implements both **RFC 9728 (OAuth 2.0 Protected Resource Metadata)** and **RFC 8414 (Authorization Server Metadata)** for automatic OAuth2 discovery, complying with the MCP 2025-06-18 specification.
+
+#### Protected Resource Metadata (RFC 9728) - Required by MCP Spec
+
+MCP clients discover the authorization server by fetching:
 
 ```
-https://<tenantId>.docebosaas.com/mcp/.well-known/oauth-authorization-server
+GET /.well-known/oauth-protected-resource
 ```
 
 **Multi-Tenant Example:**
 
-For a deployment at `https://acme.docebosaas.com/mcp`, the discovery endpoint returns:
+For a deployment at `https://acme.docebosaas.com/mcp`:
+
+```json
+{
+  "resource": "https://acme.docebosaas.com/mcp",
+  "authorization_servers": [
+    "https://acme.docebosaas.com/oauth2"
+  ]
+}
+```
+
+#### Authorization Server Metadata (RFC 8414)
+
+For clients that need detailed authorization server information:
+
+```
+GET /.well-known/oauth-authorization-server
+```
+
+Returns:
 
 ```json
 {
@@ -89,6 +114,14 @@ For a deployment at `https://acme.docebosaas.com/mcp`, the discovery endpoint re
   "grant_types_supported": ["authorization_code", "password", "refresh_token"],
   "code_challenge_methods_supported": ["S256"]
 }
+```
+
+#### WWW-Authenticate Header
+
+When authentication fails (401 Unauthorized), the server includes a `WWW-Authenticate` header pointing to the protected resource metadata:
+
+```
+WWW-Authenticate: Bearer realm="https://acme.docebosaas.com/.well-known/oauth-protected-resource"
 ```
 
 Each tenant automatically gets their own OAuth2 endpoints based on their subdomain. No configuration required!

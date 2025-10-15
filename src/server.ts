@@ -64,7 +64,13 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
 function extractBearerToken(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
+  // Build WWW-Authenticate header per RFC 9728
+  const host = req.headers.host || 'localhost';
+  const protocol = host.startsWith('localhost') ? 'http' : 'https';
+  const metadataUrl = `${protocol}://${host}/.well-known/oauth-protected-resource`;
+
   if (!authHeader) {
+    res.setHeader('WWW-Authenticate', `Bearer realm="${metadataUrl}"`);
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authorization header is required',
@@ -75,6 +81,7 @@ function extractBearerToken(req: Request, res: Response, next: NextFunction): vo
   // Expected format: "Bearer <token>"
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
+    res.setHeader('WWW-Authenticate', `Bearer realm="${metadataUrl}", error="invalid_token"`);
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Invalid Authorization format. Expected: Bearer <token>',
@@ -156,6 +163,52 @@ app.options('/.well-known/oauth-authorization-server', (req: Request, res: Respo
 });
 
 app.get('/.well-known/oauth-authorization-server', handleOAuthDiscovery);
+
+/**
+ * OAuth2 Protected Resource Metadata (RFC 9728)
+ * MCP servers act as OAuth2 Resource Servers and must advertise their authorization servers
+ *
+ * This endpoint is required by MCP spec 2025-06-18
+ */
+app.options('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (appConfig.server.allowLocalDev) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  res.status(204).end();
+});
+
+app.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+  // Extract hostname from Host header
+  const host = req.headers.host || 'localhost';
+  const hostname = host.split(':')[0];
+  const protocol = hostname === 'localhost' || hostname === '127.0.0.1' ? 'http' : 'https';
+
+  try {
+    const endpoints = getOAuthEndpoints(hostname);
+
+    // Set CORS headers for MCP Inspector and other clients
+    const origin = req.headers.origin;
+    if (appConfig.server.allowLocalDev) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+
+    res.json({
+      resource: `${protocol}://${host}/mcp`,
+      authorization_servers: [endpoints.issuer]
+    });
+  } catch (error) {
+    console.error('[Protected Resource Metadata] Error getting endpoints:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error instanceof Error ? error.message : 'Failed to determine authorization servers',
+    });
+  }
+});
 
 /**
  * OPTIONS handler for CORS preflight
