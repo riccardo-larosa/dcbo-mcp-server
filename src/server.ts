@@ -122,7 +122,7 @@ function handleOAuthDiscovery(req: Request, res: Response): void {
     if (appConfig.server.allowLocalDev) {
       res.setHeader('Access-Control-Allow-Origin', origin || '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
     }
 
     res.json({
@@ -145,8 +145,8 @@ function handleOAuthDiscovery(req: Request, res: Response): void {
 }
 
 /**
- * OAuth2 Protected Resource Metadata (RFC 9728)
- * Allows MCP clients to discover the authorization server
+ * OAuth2 Authorization Server Metadata (RFC 8414)
+ * Allows MCP clients to discover the authorization server capabilities
  *
  * Dynamically returns tenant-specific endpoints based on the Host header:
  * - For *.docebosaas.com: returns endpoints at https://<tenant>.docebosaas.com/oauth2
@@ -157,7 +157,7 @@ app.options('/.well-known/oauth-authorization-server', (req: Request, res: Respo
   if (appConfig.server.allowLocalDev) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
   }
   res.status(204).end();
 });
@@ -165,22 +165,9 @@ app.options('/.well-known/oauth-authorization-server', (req: Request, res: Respo
 app.get('/.well-known/oauth-authorization-server', handleOAuthDiscovery);
 
 /**
- * OAuth2 Protected Resource Metadata (RFC 9728)
- * MCP servers act as OAuth2 Resource Servers and must advertise their authorization servers
- *
- * This endpoint is required by MCP spec 2025-06-18
+ * Helper function to handle protected resource metadata request
  */
-app.options('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
-  const origin = req.headers.origin;
-  if (appConfig.server.allowLocalDev) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  }
-  res.status(204).end();
-});
-
-app.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+function handleProtectedResourceMetadata(req: Request, res: Response): void {
   // Extract hostname from Host header
   const host = req.headers.host || 'localhost';
   const hostname = host.split(':')[0];
@@ -194,7 +181,7 @@ app.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) =
     if (appConfig.server.allowLocalDev) {
       res.setHeader('Access-Control-Allow-Origin', origin || '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
     }
 
     res.json({
@@ -208,7 +195,40 @@ app.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) =
       message: error instanceof Error ? error.message : 'Failed to determine authorization servers',
     });
   }
+}
+
+/**
+ * OAuth2 Protected Resource Metadata (RFC 9728)
+ * MCP servers act as OAuth2 Resource Servers and must advertise their authorization servers
+ *
+ * This endpoint is required by MCP spec 2025-06-18
+ * MCP Inspector may request both /.well-known/oauth-protected-resource and
+ * /.well-known/oauth-protected-resource/mcp
+ */
+app.options('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (appConfig.server.allowLocalDev) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
+  }
+  res.status(204).end();
 });
+
+app.get('/.well-known/oauth-protected-resource', handleProtectedResourceMetadata);
+
+// MCP Inspector may append /mcp to the protected resource URL
+app.options('/.well-known/oauth-protected-resource/mcp', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (appConfig.server.allowLocalDev) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
+  }
+  res.status(204).end();
+});
+
+app.get('/.well-known/oauth-protected-resource/mcp', handleProtectedResourceMetadata);
 
 /**
  * OPTIONS handler for CORS preflight
