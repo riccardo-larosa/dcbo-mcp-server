@@ -92,15 +92,15 @@ export function getOAuthEndpoints(hostname: string): OAuthEndpoints {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
 
   if (isLocalhost) {
-    // Local development: use .env values
-    if (!appConfig.oauth.authorizationUrl || !appConfig.oauth.tokenUrl) {
-      throw new Error('OAUTH_AUTHORIZATION_URL and OAUTH_TOKEN_URL must be set for localhost development');
-    }
+    // Local development: Return localhost URLs for MCP Inspector compatibility
+    // This allows MCP Inspector to fetch metadata without CORS issues
+    // Users must manually obtain tokens from Docebo and paste them into MCP Inspector
+    const port = appConfig.server.port;
 
     return {
-      issuer: appConfig.docebo.baseUrl + '/oauth2',
-      authorizationEndpoint: appConfig.oauth.authorizationUrl,
-      tokenEndpoint: appConfig.oauth.tokenUrl,
+      issuer: `http://localhost:${port}/oauth2`,
+      authorizationEndpoint: `http://localhost:${port}/oauth2/authorize`,
+      tokenEndpoint: `http://localhost:${port}/oauth2/token`,
     };
   }
 
@@ -122,6 +122,20 @@ export function getOAuthEndpoints(hostname: string): OAuthEndpoints {
   // Fallback: use the hostname as-is (assumes it's a valid Docebo domain)
   const protocol = hostname.startsWith('localhost') ? 'http' : 'https';
   const baseUrl = `${protocol}://${hostname}`;
+
+  return {
+    issuer: `${baseUrl}/oauth2`,
+    authorizationEndpoint: `${baseUrl}/oauth2/authorize`,
+    tokenEndpoint: `${baseUrl}/oauth2/token`,
+  };
+}
+
+/**
+ * Get the real Docebo OAuth endpoints for fetching authorization server metadata
+ * Used to proxy metadata requests to the actual Docebo server
+ */
+export function getDoceboOAuthEndpoints(): OAuthEndpoints {
+  const baseUrl = appConfig.docebo.baseUrl;
 
   return {
     issuer: `${baseUrl}/oauth2`,

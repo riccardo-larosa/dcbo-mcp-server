@@ -184,14 +184,24 @@ npm run dev
 
 ### Using with MCP Inspector
 
-The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers locally. To use it with this server:
+#### OAuth Discovery Flow
+
+The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers locally.
+
+**How it works in development mode:**
+- MCP Inspector discovers OAuth endpoints at `http://localhost:3000`
+- The server returns localhost URLs to avoid CORS issues
+- OAuth endpoints point to localhost, but they don't actually work (no proxy)
+- You must **manually obtain a token** from Docebo and paste it into MCP Inspector
+
+**Setup steps:**
 
 1. Enable local dev mode in your `.env`:
    ```env
    ALLOW_LOCAL_DEV=true
    ```
 
-2. Get an OAuth2 token from Docebo:
+2. **Manually get an OAuth2 token** from Docebo:
    ```bash
    curl -X POST "https://your-tenant.docebosaas.com/oauth2/token" \
      -d "grant_type=password" \
@@ -201,6 +211,8 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool
      -d "password=your_password" \
      -d "scope=api"
    ```
+
+   Save the `access_token` from the response.
 
 3. Start the server:
    ```bash
@@ -212,9 +224,10 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool
    npx @modelcontextprotocol/inspector streamable-http http://localhost:3000/mcp
    ```
 
-5. In the Inspector UI, add the Bearer token:
-   - Header: `Authorization`
-   - Value: `Bearer <access_token_from_step_2>`
+5. **In the Inspector UI:**
+   - MCP Inspector will discover OAuth metadata automatically
+   - When prompted for authentication, **manually paste the token** you obtained in step 2
+   - Or add it as a header: `Authorization: Bearer <access_token_from_step_2>`
 
 **Important**: Always set `ALLOW_LOCAL_DEV=false` in production! This setting disables origin validation and should only be used for local development.
 

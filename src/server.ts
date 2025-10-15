@@ -231,6 +231,52 @@ app.options('/.well-known/oauth-protected-resource/mcp', (req: Request, res: Res
 app.get('/.well-known/oauth-protected-resource/mcp', handleProtectedResourceMetadata);
 
 /**
+ * OAuth2 Authorization Server Metadata at /oauth2 path (for MCP Inspector)
+ *
+ * In local development, MCP Inspector will request this endpoint based on the
+ * authorization_servers value from /.well-known/oauth-protected-resource
+ *
+ * This endpoint returns metadata with localhost URLs but describes the real
+ * Docebo OAuth server capabilities. Users must manually obtain tokens from
+ * Docebo and paste them into MCP Inspector.
+ */
+app.options('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (appConfig.server.allowLocalDev) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
+  }
+  res.status(204).end();
+});
+
+app.get('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  // Return localhost URLs for MCP Inspector compatibility
+  // This describes the Docebo OAuth server capabilities but with localhost URLs
+  const host = req.headers.host || 'localhost';
+  const protocol = host.startsWith('localhost') ? 'http' : 'https';
+
+  // Set CORS headers for MCP Inspector
+  const origin = req.headers.origin;
+  if (appConfig.server.allowLocalDev) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
+  }
+
+  res.json({
+    issuer: `${protocol}://${host}/oauth2`,
+    authorization_endpoint: `${protocol}://${host}/oauth2/authorize`,
+    token_endpoint: `${protocol}://${host}/oauth2/token`,
+    scopes_supported: ['api'],
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
+    code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+  });
+});
+
+/**
  * OPTIONS handler for CORS preflight
  */
 app.options('/mcp', validateOrigin, (_req: Request, res: Response) => {
