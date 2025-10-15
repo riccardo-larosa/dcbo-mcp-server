@@ -33,7 +33,13 @@ cp .env.example .env
 2. Configure the server:
 
 ```env
+# Docebo API base URL
 DOCEBO_BASE_URL=https://your-tenant.docebosaas.com
+
+# OAuth2 endpoints (for client discovery)
+OAUTH_AUTHORIZATION_URL=https://your-tenant.docebosaas.com/oauth2/authorize
+OAUTH_TOKEN_URL=https://your-tenant.docebosaas.com/oauth2/token
+
 PORT=3000
 ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
 
@@ -41,7 +47,11 @@ ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
 ALLOW_LOCAL_DEV=true
 ```
 
-**Note**: The server is stateless and doesn't store any credentials. OAuth2 authentication is handled by MCP clients.
+**Note**:
+- The server is stateless and doesn't store any credentials
+- OAuth2 endpoints are configured server-side and exposed via the discovery endpoint
+- MCP clients discover these endpoints automatically from `/.well-known/oauth-authorization-server`
+- This allows you to use any OAuth2 provider (not just Docebo)
 
 ## Client Configuration
 

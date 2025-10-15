@@ -12,6 +12,10 @@ interface Config {
   docebo: {
     baseUrl: string;
   };
+  oauth: {
+    authorizationUrl: string;
+    tokenUrl: string;
+  };
   server: {
     port: number;
     allowedOrigins: string[];
@@ -22,6 +26,8 @@ interface Config {
 function validateEnv(): Config {
   const required = [
     'DOCEBO_BASE_URL',
+    'OAUTH_AUTHORIZATION_URL',
+    'OAUTH_TOKEN_URL',
   ];
 
   const missing = required.filter((key) => !process.env[key]);
@@ -33,6 +39,18 @@ function validateEnv(): Config {
   const baseUrl = process.env.DOCEBO_BASE_URL!;
   if (!baseUrl.startsWith('https://')) {
     throw new Error('DOCEBO_BASE_URL must use HTTPS');
+  }
+
+  // Validate OAuth URLs
+  const authUrl = process.env.OAUTH_AUTHORIZATION_URL!;
+  const tokenUrl = process.env.OAUTH_TOKEN_URL!;
+
+  if (!authUrl.startsWith('https://') && !authUrl.startsWith('http://localhost')) {
+    throw new Error('OAUTH_AUTHORIZATION_URL must use HTTPS (or http://localhost for dev)');
+  }
+
+  if (!tokenUrl.startsWith('https://') && !tokenUrl.startsWith('http://localhost')) {
+    throw new Error('OAUTH_TOKEN_URL must use HTTPS (or http://localhost for dev)');
   }
 
   // Parse allowed origins
@@ -47,6 +65,10 @@ function validateEnv(): Config {
     docebo: {
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
     },
+    oauth: {
+      authorizationUrl: authUrl,
+      tokenUrl: tokenUrl,
+    },
     server: {
       port: parseInt(process.env.PORT || '3000', 10),
       allowedOrigins,
@@ -60,6 +82,8 @@ export const appConfig = validateEnv();
 // Log loaded config (without secrets)
 console.log('[Config] Loaded configuration:', {
   doceboBaseUrl: appConfig.docebo.baseUrl,
+  oauthAuthorizationUrl: appConfig.oauth.authorizationUrl,
+  oauthTokenUrl: appConfig.oauth.tokenUrl,
   serverPort: appConfig.server.port,
   allowedOrigins: appConfig.server.allowedOrigins,
   allowLocalDev: appConfig.server.allowLocalDev,
