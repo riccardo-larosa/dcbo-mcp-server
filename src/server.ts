@@ -99,20 +99,24 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * OAuth2 Protected Resource Metadata (RFC 9728)
- * Allows MCP clients to discover the authorization server
- *
- * Dynamically returns tenant-specific endpoints based on the Host header:
- * - For *.docebosaas.com: returns endpoints at https://<tenant>.docebosaas.com/oauth2
- * - For localhost: uses .env configuration
+ * Helper function to handle OAuth2 discovery request
+ * Shared between GET and OPTIONS handlers
  */
-app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+function handleOAuthDiscovery(req: Request, res: Response): void {
   // Extract hostname from Host header
   const host = req.headers.host || 'localhost';
   const hostname = host.split(':')[0]; // Remove port if present
 
   try {
     const endpoints = getOAuthEndpoints(hostname);
+
+    // Set CORS headers for MCP Inspector and other clients
+    const origin = req.headers.origin;
+    if (appConfig.server.allowLocalDev) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
 
     res.json({
       issuer: endpoints.issuer,
@@ -131,7 +135,27 @@ app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response)
       message: error instanceof Error ? error.message : 'Failed to determine OAuth endpoints',
     });
   }
+}
+
+/**
+ * OAuth2 Protected Resource Metadata (RFC 9728)
+ * Allows MCP clients to discover the authorization server
+ *
+ * Dynamically returns tenant-specific endpoints based on the Host header:
+ * - For *.docebosaas.com: returns endpoints at https://<tenant>.docebosaas.com/oauth2
+ * - For localhost: uses .env configuration
+ */
+app.options('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (appConfig.server.allowLocalDev) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  res.status(204).end();
 });
+
+app.get('/.well-known/oauth-authorization-server', handleOAuthDiscovery);
 
 /**
  * OPTIONS handler for CORS preflight

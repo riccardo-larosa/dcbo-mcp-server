@@ -26,30 +26,25 @@ Currently, the server trusts the hostname when constructing tenant-specific OAut
 
 ### Root-Level OAuth Discovery Endpoint
 
-**Status**: Not Implemented
+**Status**: ✅ Implemented
 **Priority**: Low
 
-**Current Implementation**:
-- OAuth discovery endpoint is at: `<tenant>.docebosaas.com/mcp/.well-known/oauth-authorization-server`
+**Implementation**:
+- OAuth discovery endpoint is available at the root: `/.well-known/oauth-authorization-server`
+- Supports CORS for MCP Inspector and other web-based clients
+- Includes OPTIONS handler for CORS preflight requests
+- Works with both production (`*.docebosaas.com`) and localhost deployments
 
-**Proposed Enhancement**:
-- Also support root-level discovery at: `<tenant>.docebosaas.com/.well-known/oauth-authorization-server`
+**Deployment Note**:
+If the application is deployed at a subpath like `/mcp` via reverse proxy, configure the proxy to route `/.well-known/oauth-authorization-server` requests to the application. For example, with nginx:
 
-**Rationale**:
-- RFC 8414 (OAuth 2.0 Authorization Server Metadata) specifies the `.well-known` endpoint should be at the root
-- Some OAuth2 clients may expect the discovery endpoint at the root level
-- Better compliance with OAuth2 standards
+```nginx
+location /.well-known/oauth-authorization-server {
+    proxy_pass http://app_server/.well-known/oauth-authorization-server;
+}
+```
 
-**Implementation Considerations**:
-- May require coordination with reverse proxy or load balancer configuration
-- Both endpoints could coexist (root and `/mcp` prefix)
-- Ensure consistent response from both endpoints
-- Update documentation to reflect both endpoint locations
-
-**Potential Challenges**:
-- If the MCP server is deployed at `/mcp`, it may not have access to configure routes at the root level
-- May require web server/reverse proxy configuration (e.g., nginx, Apache)
-- Consider whether this should be handled at the application level or infrastructure level
+The Express application itself serves the endpoint at `/.well-known/oauth-authorization-server` (application root), regardless of deployment path.
 
 ---
 
