@@ -221,16 +221,19 @@ This enables the complete Authorization Code + PKCE OAuth flow, just like in pro
    ```
 
 5. **Run MCP Inspector:**
+
+   **Important**: Connect MCP Inspector to the **ngrok URL**, not localhost:
    ```bash
    npx @modelcontextprotocol/inspector streamable-http https://abc123.ngrok.io/mcp
    ```
 
 6. **In the Inspector UI:**
    - Click "Authenticate with OAuth"
-   - MCP Inspector will automatically start the OAuth flow
+   - MCP Inspector will discover the ngrok OAuth endpoints
+   - Click the authorize link (it will use your ngrok URL)
    - You'll be redirected to Docebo to log in
-   - After login, you'll be redirected back with a token
-   - MCP Inspector will use the token automatically
+   - After login, you'll be redirected back to ngrok with a token
+   - MCP Inspector will automatically exchange the code for an access token
 
 **Benefits:**
 - ✅ Full OAuth Authorization Code + PKCE flow

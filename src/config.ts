@@ -96,17 +96,20 @@ export interface OAuthEndpoints {
 export function getOAuthEndpoints(hostname: string): OAuthEndpoints {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
 
-  if (isLocalhost) {
-    // If NGROK_URL is set, use it for OAuth endpoints (full OAuth flow with tunnel)
-    if (appConfig.server.ngrokUrl) {
-      const ngrokUrl = appConfig.server.ngrokUrl.replace(/\/$/, '');
-      return {
-        issuer: `${ngrokUrl}/oauth2`,
-        authorizationEndpoint: `${ngrokUrl}/oauth2/authorize`,
-        tokenEndpoint: `${ngrokUrl}/oauth2/token`,
-      };
-    }
+  // Check if this is an ngrok hostname
+  const isNgrok = hostname.includes('ngrok') || hostname.includes('ngrok-free.app');
 
+  // If NGROK_URL is configured and request is from ngrok or localhost, use ngrok URLs
+  if (appConfig.server.ngrokUrl && (isLocalhost || isNgrok)) {
+    const ngrokUrl = appConfig.server.ngrokUrl.replace(/\/$/, '');
+    return {
+      issuer: `${ngrokUrl}/oauth2`,
+      authorizationEndpoint: `${ngrokUrl}/oauth2/authorize`,
+      tokenEndpoint: `${ngrokUrl}/oauth2/token`,
+    };
+  }
+
+  if (isLocalhost) {
     // Otherwise, return localhost URLs for manual token flow
     // This allows MCP Inspector to fetch metadata without CORS issues
     // Users must manually obtain tokens from Docebo and paste them into MCP Inspector
