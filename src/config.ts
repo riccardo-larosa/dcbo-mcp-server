@@ -92,15 +92,15 @@ export function getOAuthEndpoints(hostname: string): OAuthEndpoints {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
 
   if (isLocalhost) {
-    // Local development: Return localhost URLs
-    // MCP Inspector will use these to construct OAuth URLs
+    // Local development: Return the REAL Docebo OAuth endpoints
+    // MCP Inspector will use these to construct OAuth URLs pointing to Docebo
     // The redirect_uri in the OAuth flow should point to ngrok tunnel of MCP Inspector (port 6274)
-    const port = appConfig.server.port;
+    const doceboBaseUrl = appConfig.docebo.baseUrl;
 
     return {
-      issuer: `http://localhost:${port}/oauth2`,
-      authorizationEndpoint: `http://localhost:${port}/oauth2/authorize`,
-      tokenEndpoint: `http://localhost:${port}/oauth2/token`,
+      issuer: `${doceboBaseUrl}/oauth2`,
+      authorizationEndpoint: `${doceboBaseUrl}/oauth2/authorize`,
+      tokenEndpoint: `${doceboBaseUrl}/oauth2/token`,
     };
   }
 
