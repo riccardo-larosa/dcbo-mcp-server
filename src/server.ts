@@ -251,9 +251,10 @@ app.options('/oauth2/.well-known/oauth-authorization-server', (req: Request, res
 });
 
 app.get('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
-  // Return the REAL Docebo OAuth endpoints
-  // MCP Inspector will use these to construct the OAuth flow
-  const doceboBaseUrl = appConfig.docebo.baseUrl;
+  // Return localhost URLs to avoid CORS issues with Docebo
+  // The localhost /oauth2/* endpoints proxy requests to Docebo
+  const host = req.headers.host || 'localhost';
+  const protocol = host.startsWith('localhost') ? 'http' : 'https';
 
   // Set CORS headers for MCP Inspector
   const origin = req.headers.origin;
@@ -264,9 +265,9 @@ app.get('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Re
   }
 
   res.json({
-    issuer: `${doceboBaseUrl}/oauth2`,
-    authorization_endpoint: `${doceboBaseUrl}/oauth2/authorize`,
-    token_endpoint: `${doceboBaseUrl}/oauth2/token`,
+    issuer: `${protocol}://${host}/oauth2`,
+    authorization_endpoint: `${protocol}://${host}/oauth2/authorize`,
+    token_endpoint: `${protocol}://${host}/oauth2/token`,
     scopes_supported: ['api'],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
