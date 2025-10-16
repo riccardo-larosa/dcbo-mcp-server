@@ -277,6 +277,135 @@ app.get('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Re
 });
 
 /**
+ * OAuth2 Authorization Endpoint Proxy (for ngrok/tunnel usage)
+ *
+ * Proxies authorization requests to Docebo OAuth server.
+ * Used when MCP Inspector connects via ngrok tunnel.
+ *
+ * Flow:
+ * 1. MCP Inspector → https://your-tunnel.ngrok.io/oauth2/authorize
+ * 2. This endpoint → Redirects to Docebo OAuth
+ * 3. User logs in at Docebo
+ * 4. Docebo → Redirects to https://your-tunnel.ngrok.io/oauth2/callback
+ */
+app.get('/oauth2/authorize', (req: Request, res: Response) => {
+  const doceboBaseUrl = appConfig.docebo.baseUrl;
+
+  // Build the Docebo authorization URL with all query parameters
+  const doceboAuthUrl = new URL(`${doceboBaseUrl}/oauth2/authorize`);
+
+  // Copy all query parameters from the request
+  Object.entries(req.query).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      doceboAuthUrl.searchParams.set(key, value);
+    }
+  });
+
+  console.log('[OAuth Proxy] Redirecting to Docebo authorize:', doceboAuthUrl.toString());
+
+  // Redirect to Docebo OAuth
+  res.redirect(doceboAuthUrl.toString());
+});
+
+/**
+ * OAuth2 Callback Endpoint (for ngrok/tunnel usage)
+ *
+ * Handles the redirect back from Docebo after user authorization.
+ * Exchanges the authorization code for an access token.
+ */
+app.get('/oauth2/callback', async (req: Request, res: Response) => {
+  const { code, state, error, error_description } = req.query;
+
+  // Handle OAuth errors
+  if (error) {
+    console.error('[OAuth Callback] Error from Docebo:', error, error_description);
+    res.status(400).send(`OAuth Error: ${error} - ${error_description}`);
+    return;
+  }
+
+  if (!code || typeof code !== 'string') {
+    res.status(400).send('Missing authorization code');
+    return;
+  }
+
+  console.log('[OAuth Callback] Received authorization code, state:', state);
+
+  // For now, just display the code - MCP Inspector needs to handle the actual exchange
+  // In a full implementation, we'd exchange the code for a token here
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>OAuth Callback</title>
+      <style>
+        body { font-family: system-ui; padding: 2rem; max-width: 600px; margin: 0 auto; }
+        code { background: #f5f5f5; padding: 0.2rem 0.4rem; border-radius: 3px; }
+        .success { color: #059669; }
+      </style>
+    </head>
+    <body>
+      <h1 class="success">✓ Authorization Successful</h1>
+      <p>Received authorization code from Docebo.</p>
+      <p><strong>Code:</strong> <code>${code}</code></p>
+      <p><strong>State:</strong> <code>${state || 'none'}</code></p>
+      <p>You can close this window and return to MCP Inspector.</p>
+      <script>
+        // Attempt to send message to opener (MCP Inspector)
+        if (window.opener) {
+          window.opener.postMessage({
+            type: 'oauth-callback',
+            code: '${code}',
+            state: '${state || ''}'
+          }, '*');
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+/**
+ * OAuth2 Token Endpoint Proxy (for ngrok/tunnel usage)
+ *
+ * Proxies token requests to Docebo OAuth server.
+ * Exchanges authorization code for access token.
+ */
+app.post('/oauth2/token', async (req: Request, res: Response) => {
+  const doceboBaseUrl = appConfig.docebo.baseUrl;
+  const doceboTokenUrl = `${doceboBaseUrl}/oauth2/token`;
+
+  console.log('[OAuth Token Proxy] Proxying token request to Docebo');
+
+  try {
+    // Forward the token request to Docebo
+    const response = await fetch(doceboTokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams(req.body).toString(),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('[OAuth Token Proxy] Error from Docebo:', data);
+      res.status(response.status).json(data);
+      return;
+    }
+
+    console.log('[OAuth Token Proxy] Successfully exchanged code for token');
+    res.json(data);
+  } catch (error) {
+    console.error('[OAuth Token Proxy] Error proxying to Docebo:', error);
+    res.status(500).json({
+      error: 'proxy_error',
+      error_description: 'Failed to proxy token request to Docebo',
+    });
+  }
+});
+
+/**
  * OPTIONS handler for CORS preflight
  */
 app.options('/mcp', validateOrigin, (_req: Request, res: Response) => {

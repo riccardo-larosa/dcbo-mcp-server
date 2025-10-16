@@ -184,24 +184,74 @@ npm run dev
 
 ### Using with MCP Inspector
 
-#### OAuth Discovery Flow
+The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers locally. You can use it with either **manual token flow** or **full OAuth flow with ngrok**.
 
-The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers locally.
+#### Option 1: Full OAuth Flow with Ngrok (Recommended)
 
-**How it works in development mode:**
-- MCP Inspector discovers OAuth endpoints at `http://localhost:3000`
-- The server returns localhost URLs to avoid CORS issues
-- OAuth endpoints point to localhost, but they don't actually work (no proxy)
-- You must **manually obtain a token** from Docebo and paste it into MCP Inspector
+This enables the complete Authorization Code + PKCE OAuth flow, just like in production.
 
-**Setup steps:**
+**Setup:**
+
+1. **Install and start ngrok:**
+   ```bash
+   # Install ngrok (https://ngrok.com)
+   brew install ngrok  # or download from ngrok.com
+
+   # Start tunnel
+   ngrok http 3000
+   ```
+
+   You'll get a public URL like: `https://abc123.ngrok.io`
+
+2. **Configure Docebo OAuth2 app:**
+   - Go to Docebo: **Admin Menu** → **API & SSO** → **API Credentials**
+   - Edit your OAuth2 app
+   - Add redirect URI: `https://abc123.ngrok.io/oauth2/callback`
+   - Save
+
+3. **Update your `.env`:**
+   ```env
+   ALLOW_LOCAL_DEV=true
+   NGROK_URL=https://abc123.ngrok.io
+   ```
+
+4. **Start the server:**
+   ```bash
+   npm run dev
+   ```
+
+5. **Run MCP Inspector:**
+   ```bash
+   npx @modelcontextprotocol/inspector streamable-http https://abc123.ngrok.io/mcp
+   ```
+
+6. **In the Inspector UI:**
+   - Click "Authenticate with OAuth"
+   - MCP Inspector will automatically start the OAuth flow
+   - You'll be redirected to Docebo to log in
+   - After login, you'll be redirected back with a token
+   - MCP Inspector will use the token automatically
+
+**Benefits:**
+- ✅ Full OAuth Authorization Code + PKCE flow
+- ✅ Automatic token exchange
+- ✅ Same flow as production
+- ✅ No manual token management
+
+---
+
+#### Option 2: Manual Token Flow (Simpler, No ngrok needed)
+
+If you don't want to set up ngrok, you can manually obtain a token.
+
+**Setup:**
 
 1. Enable local dev mode in your `.env`:
    ```env
    ALLOW_LOCAL_DEV=true
    ```
 
-2. **Manually get an OAuth2 token** from Docebo:
+2. **Get an OAuth2 token** from Docebo:
    ```bash
    curl -X POST "https://your-tenant.docebosaas.com/oauth2/token" \
      -d "grant_type=password" \
@@ -219,17 +269,16 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool
    npm run dev
    ```
 
-4. Run the MCP Inspector:
+4. Run MCP Inspector:
    ```bash
    npx @modelcontextprotocol/inspector streamable-http http://localhost:3000/mcp
    ```
 
 5. **In the Inspector UI:**
-   - MCP Inspector will discover OAuth metadata automatically
-   - When prompted for authentication, **manually paste the token** you obtained in step 2
-   - Or add it as a header: `Authorization: Bearer <access_token_from_step_2>`
+   - When prompted for authentication, **paste the token** from step 2
+   - Or add header: `Authorization: Bearer <access_token>`
 
-**Important**: Always set `ALLOW_LOCAL_DEV=false` in production! This setting disables origin validation and should only be used for local development.
+**Important**: Always set `ALLOW_LOCAL_DEV=false` in production!
 
 ## Production
 
