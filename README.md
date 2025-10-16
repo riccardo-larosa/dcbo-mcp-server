@@ -188,58 +188,63 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool
 
 #### Option 1: Full OAuth Flow with Ngrok (Recommended)
 
-This enables the complete Authorization Code + PKCE OAuth flow, just like in production.
+This enables the complete Authorization Code + PKCE OAuth flow by tunneling MCP Inspector's callback port.
+
+**How it works:**
+- Your MCP server runs on `localhost:3000` (no tunnel needed)
+- MCP Inspector runs on `localhost:6274`
+- Ngrok tunnels `localhost:6274` → `https://abc123.ngrok.io`
+- Docebo redirects to the ngrok URL, which tunnels back to MCP Inspector
 
 **Setup:**
 
-1. **Install and start ngrok:**
+1. **Start your MCP server:**
+   ```bash
+   # Update .env
+   ALLOW_LOCAL_DEV=true
+
+   # Start server
+   npm run dev
+   ```
+
+2. **Start MCP Inspector:**
+   ```bash
+   npx @modelcontextprotocol/inspector streamable-http http://localhost:3000/mcp
+   ```
+
+3. **Start ngrok for MCP Inspector's port:**
    ```bash
    # Install ngrok (https://ngrok.com)
    brew install ngrok  # or download from ngrok.com
 
-   # Start tunnel
-   ngrok http 3000
+   # Tunnel MCP Inspector's callback port
+   ngrok http 6274
    ```
 
    You'll get a public URL like: `https://abc123.ngrok.io`
 
-2. **Configure Docebo OAuth2 app:**
+4. **Configure Docebo OAuth2 app:**
    - Go to Docebo: **Admin Menu** → **API & SSO** → **API Credentials**
-   - Edit your OAuth2 app
-   - Add redirect URI: `https://abc123.ngrok.io/oauth2/callback`
+   - Edit your OAuth2 app (`my-mcp-server`)
+   - Add redirect URI: `https://abc123.ngrok.io/oauth/callback/debug`
    - Save
 
-3. **Update your `.env`:**
-   ```env
-   ALLOW_LOCAL_DEV=true
-   NGROK_URL=https://abc123.ngrok.io
-   ```
-
-4. **Start the server:**
-   ```bash
-   npm run dev
-   ```
-
-5. **Run MCP Inspector:**
-
-   **Important**: Connect MCP Inspector to the **ngrok URL**, not localhost:
-   ```bash
-   npx @modelcontextprotocol/inspector streamable-http https://abc123.ngrok.io/mcp
-   ```
-
-6. **In the Inspector UI:**
+5. **In MCP Inspector UI:**
    - Click "Authenticate with OAuth"
-   - MCP Inspector will discover the ngrok OAuth endpoints
-   - Click the authorize link (it will use your ngrok URL)
-   - You'll be redirected to Docebo to log in
-   - After login, you'll be redirected back to ngrok with a token
-   - MCP Inspector will automatically exchange the code for an access token
+   - MCP Inspector will show you the authorization URL
+   - **Important**: Before clicking, edit the URL to replace:
+     - `redirect_uri=http://localhost:6274/oauth/callback/debug`
+     - With: `redirect_uri=https://abc123.ngrok.io/oauth/callback/debug`
+   - Paste the edited URL in your browser
+   - Log in to Docebo
+   - You'll be redirected back through ngrok to MCP Inspector
+   - MCP Inspector will automatically exchange the code for a token
 
 **Benefits:**
 - ✅ Full OAuth Authorization Code + PKCE flow
 - ✅ Automatic token exchange
 - ✅ Same flow as production
-- ✅ No manual token management
+- ✅ Works around Docebo's redirect URI restrictions
 
 ---
 

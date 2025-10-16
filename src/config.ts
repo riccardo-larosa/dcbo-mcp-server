@@ -20,7 +20,6 @@ interface Config {
     port: number;
     allowedOrigins: string[];
     allowLocalDev: boolean;
-    ngrokUrl?: string;
   };
 }
 
@@ -60,9 +59,6 @@ function validateEnv(): Config {
   // Allow disabling origin check for local development (MCP Inspector, etc.)
   const allowLocalDev = process.env.ALLOW_LOCAL_DEV === 'true';
 
-  // Ngrok URL for OAuth with MCP Inspector
-  const ngrokUrl = process.env.NGROK_URL;
-
   return {
     docebo: {
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
@@ -75,7 +71,6 @@ function validateEnv(): Config {
       port: parseInt(process.env.PORT || '3000', 10),
       allowedOrigins,
       allowLocalDev,
-      ngrokUrl,
     },
   };
 }
@@ -96,23 +91,10 @@ export interface OAuthEndpoints {
 export function getOAuthEndpoints(hostname: string): OAuthEndpoints {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
 
-  // Check if this is an ngrok hostname
-  const isNgrok = hostname.includes('ngrok') || hostname.includes('ngrok-free.app');
-
-  // If NGROK_URL is configured and request is from ngrok or localhost, use ngrok URLs
-  if (appConfig.server.ngrokUrl && (isLocalhost || isNgrok)) {
-    const ngrokUrl = appConfig.server.ngrokUrl.replace(/\/$/, '');
-    return {
-      issuer: `${ngrokUrl}/oauth2`,
-      authorizationEndpoint: `${ngrokUrl}/oauth2/authorize`,
-      tokenEndpoint: `${ngrokUrl}/oauth2/token`,
-    };
-  }
-
   if (isLocalhost) {
-    // Otherwise, return localhost URLs for manual token flow
-    // This allows MCP Inspector to fetch metadata without CORS issues
-    // Users must manually obtain tokens from Docebo and paste them into MCP Inspector
+    // Local development: Return localhost URLs
+    // MCP Inspector will use these to construct OAuth URLs
+    // The redirect_uri in the OAuth flow should point to ngrok tunnel of MCP Inspector (port 6274)
     const port = appConfig.server.port;
 
     return {
