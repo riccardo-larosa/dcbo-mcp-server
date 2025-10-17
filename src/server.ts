@@ -125,7 +125,7 @@ function handleOAuthDiscovery(req: Request, res: Response): void {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
     }
 
-    res.json({
+    const metadata: any = {
       issuer: endpoints.issuer,
       authorization_endpoint: endpoints.authorizationEndpoint,
       token_endpoint: endpoints.tokenEndpoint,
@@ -134,7 +134,18 @@ function handleOAuthDiscovery(req: Request, res: Response): void {
       grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
       token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    });
+    };
+
+    // Include pre-registered client credentials if configured
+    // This signals to MCP Inspector to use static credentials instead of dynamic registration
+    if (appConfig.oauth.clientId) {
+      metadata.client_id = appConfig.oauth.clientId;
+    }
+    if (appConfig.oauth.clientSecret) {
+      metadata.client_secret = appConfig.oauth.clientSecret;
+    }
+
+    res.json(metadata);
   } catch (error) {
     console.error('[OAuth Discovery] Error getting endpoints:', error);
     res.status(500).json({

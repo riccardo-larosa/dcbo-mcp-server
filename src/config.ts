@@ -15,6 +15,8 @@ interface Config {
   oauth: {
     authorizationUrl: string;
     tokenUrl: string;
+    clientId?: string;
+    clientSecret?: string;
   };
   server: {
     port: number;
@@ -51,6 +53,10 @@ function validateEnv(): Config {
     throw new Error('OAUTH_TOKEN_URL must use HTTPS (or http://localhost for dev)');
   }
 
+  // OAuth client credentials (optional) - for pre-registered clients
+  const oauthClientId = process.env.OAUTH_CLIENT_ID;
+  const oauthClientSecret = process.env.OAUTH_CLIENT_SECRET;
+
   // Parse allowed origins
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
@@ -66,6 +72,8 @@ function validateEnv(): Config {
     oauth: {
       authorizationUrl: authUrl,
       tokenUrl: tokenUrl,
+      clientId: oauthClientId,
+      clientSecret: oauthClientSecret,
     },
     server: {
       port: parseInt(process.env.PORT || '3000', 10),
@@ -149,6 +157,8 @@ console.log('[Config] Loaded configuration:', {
   doceboBaseUrl: appConfig.docebo.baseUrl,
   oauthAuthorizationUrl: appConfig.oauth.authorizationUrl || '(dynamic - based on hostname)',
   oauthTokenUrl: appConfig.oauth.tokenUrl || '(dynamic - based on hostname)',
+  oauthClientId: appConfig.oauth.clientId || '(not configured)',
+  oauthClientSecret: appConfig.oauth.clientSecret ? '(configured)' : '(not configured)',
   serverPort: appConfig.server.port,
   allowedOrigins: appConfig.server.allowedOrigins,
   allowLocalDev: appConfig.server.allowLocalDev,
