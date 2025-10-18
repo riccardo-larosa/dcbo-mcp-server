@@ -9,20 +9,36 @@ This document tracks potential improvements and features for future consideratio
 **Status**: Not Implemented
 **Priority**: Medium
 
-Currently, the server trusts the hostname when constructing tenant-specific OAuth2 endpoints. For production deployments, consider adding tenant validation:
+Currently, the server accepts any tenant ID without validation. For production deployments, consider adding tenant validation:
 
-- Validate that the tenant ID extracted from the hostname corresponds to a valid Docebo tenant
-- Options for validation:
-  - Maintain a whitelist of allowed tenant IDs
-  - Call a Docebo API endpoint to verify tenant existence
-  - Check against a database of valid tenants
-- Return appropriate error responses (404 or 403) for invalid tenants
-- Add configuration option to enable/disable validation
+- Validate that the tenant ID provided in `?tenant=xxx` parameter exists in configuration
+- Return clear error messages if tenant not configured
+- Prevents unnecessary proxy calls to non-existent tenants
 
-**Implementation Notes**:
-- Could be implemented as middleware that runs before the OAuth discovery endpoint
-- Should be cached to avoid performance impact
-- Consider rate limiting to prevent tenant enumeration attacks
+**Current behavior:**
+- Server proxies OAuth2 requests to any tenant ID without validation
+- If tenant doesn't exist, Docebo returns error to client
+
+**Proposed implementation:**
+```typescript
+function validateTenant(tenantId: string): boolean {
+  return getTenantCredentials(tenantId) !== null;
+}
+
+// In authorize/token endpoints:
+if (!validateTenant(tenant)) {
+  return res.status(404).json({
+    error: 'tenant_not_found',
+    message: `Tenant '${tenant}' is not configured`
+  });
+}
+```
+
+**Benefits:**
+- Better error messages for clients
+- Faster failure for invalid tenants
+- Reduced load on Docebo servers
+- Security: prevents enumeration of tenant IDs
 
 ### Root-Level OAuth Discovery Endpoint
 
