@@ -1,22 +1,56 @@
-# Docebo MCP Server
+# Docebo MCP OAuth2 Proxy Server
 
-Minimal MCP (Model Context Protocol) server that exposes Docebo LMS API through a secure JSON-RPC interface.
+Multi-tenant MCP (Model Context Protocol) server that acts as an OAuth2 authorization server proxy for Docebo. Similar to `mcp.zapier.com`, this server enables MCP clients to discover and authenticate with multiple Docebo tenants through a single endpoint.
 
 ## Features
 
-- **MCP 2025-06-18 Compliant**: Implements RFC 9728 (Protected Resource Metadata) and RFC 8414 (Authorization Server Metadata)
-- **Multi-Tenant OAuth2**: Automatic tenant detection from hostname with zero configuration
-- **Client-Side OAuth2**: MCP clients handle OAuth2 authentication with Docebo
-- **Stateless Server**: No credentials stored on server, accepts client Bearer tokens
-- **Secure API**: Origin validation for production security
-- **Streamable HTTP Transport**: JSON-RPC over HTTP/HTTPS
-- **Single Tool**: `docebo.list_users` - List and search Docebo users
+- **OAuth2 Proxy**: Acts as authorization server, proxying to Docebo tenants
+- **Multi-Tenant**: Support multiple Docebo tenants with separate credentials
+- **RFC Compliant**: Implements RFC 8414 (Authorization Server Metadata) and RFC 9728 (Protected Resource Metadata)
+- **Automatic Discovery**: MCP clients auto-discover OAuth2 endpoints
+- **Stateless**: No session storage, all state in OAuth parameters
+- **MCP Protocol**: Latest version 2025-03-26
+
+## Architecture
+
+```
+MCP Client (Claude, ChatGPT, etc.)
+    ↓
+    ↓ 1. Discovery: GET /.well-known/oauth-authorization-server
+    ↓
+mcp.docebosaas.com (This Server)
+    ↓ Returns: authorization_endpoint, token_endpoint
+    ↓
+    ↓ 2. OAuth Flow: GET /oauth2/authorize?tenant=riccardo-lr-test
+    ↓ Server encodes tenant in state parameter
+    ↓ Redirects to:
+    ↓
+riccardo-lr-test.docebosaas.com/oauth2/authorize
+    ↓
+    ↓ 3. User authorizes, callback with code + state
+    ↓
+    ↓ 4. Token Exchange: POST /oauth2/token (with code + state)
+    ↓ Server decodes tenant from state
+    ↓ Injects tenant credentials
+    ↓ Proxies to:
+    ↓
+riccardo-lr-test.docebosaas.com/oauth2/token
+    ↓ Returns access_token
+    ↓
+    ↓ 5. MCP Call: POST /mcp?tenant=riccardo-lr-test
+    ↓ With: Authorization: Bearer <token>
+    ↓ Server calls:
+    ↓
+riccardo-lr-test.docebosaas.com/manage/v1/*
+    ↓ Returns data to client
+```
 
 ## Prerequisites
 
 - Node.js 22.x or later
-- Docebo LMS instance with API access
-- OAuth2 app configured in Docebo (for client authentication)
+- Docebo LMS instance(s) with OAuth2 apps configured
+- OAuth2 client credentials for each tenant
+- (Optional) ngrok for local testing
 
 ## Installation
 
@@ -24,393 +58,184 @@ Minimal MCP (Model Context Protocol) server that exposes Docebo LMS API through 
 npm install
 ```
 
-## Server Configuration
+## Configuration
 
-### Multi-Tenant Support
+### 1. Server Configuration
 
-This server supports multi-tenant deployments on Docebo SaaS infrastructure:
-
-- **Production**: Deploy at `<tenantId>.docebosaas.com/mcp` - OAuth2 endpoints are automatically detected from the hostname
-- **Development**: Run on `localhost` - OAuth2 endpoints are configured via `.env` file
-
-### Configuration Steps
-
-1. Copy the example environment file:
+Copy the example environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Configure the server:
+Edit `.env`:
 
 ```env
-# Docebo API base URL
-DOCEBO_BASE_URL=https://your-tenant.docebosaas.com
-
-# OAuth2 endpoints (ONLY required for localhost development)
-# In production (*.docebosaas.com), endpoints are dynamically determined from the hostname
-OAUTH_AUTHORIZATION_URL=https://your-tenant.docebosaas.com/oauth2/authorize
-OAUTH_TOKEN_URL=https://your-tenant.docebosaas.com/oauth2/token
+# Server public URL (use ngrok URL for local testing)
+SERVER_PUBLIC_URL=https://mcp.docebosaas.com
+# Or for local testing:
+# SERVER_PUBLIC_URL=https://abc123.ngrok.io
 
 PORT=3000
-ALLOWED_ORIGINS=https://chat.openai.com,https://claude.ai
-
-# For local development with MCP Inspector
+ALLOWED_ORIGINS=*
 ALLOW_LOCAL_DEV=true
 ```
 
-**Configuration Notes**:
-- The server is stateless and doesn't store any credentials
-- **Production deployments** (`*.docebosaas.com`): OAuth2 endpoints are automatically derived from the hostname - no need to set `OAUTH_AUTHORIZATION_URL` or `OAUTH_TOKEN_URL`
-- **Local development** (`localhost`): You must specify `OAUTH_AUTHORIZATION_URL` and `OAUTH_TOKEN_URL` in `.env`
-- MCP clients discover OAuth2 endpoints automatically from `/.well-known/oauth-authorization-server`
+### 2. Tenant Configuration
 
-## Client Configuration
+Add credentials for each Docebo tenant:
 
-MCP clients (like Claude Desktop, ChatGPT, or custom clients) must be configured to handle OAuth2 authentication with Docebo.
+```env
+# Format: TENANT_{UPPERCASE_TENANT_ID}_CLIENT_ID
+#         TENANT_{UPPERCASE_TENANT_ID}_CLIENT_SECRET
 
-### OAuth2 Discovery
+# Example: Tenant "riccardo-lr-test"
+TENANT_RICCARDO_LR_TEST_CLIENT_ID=my-mcp-server
+TENANT_RICCARDO_LR_TEST_CLIENT_SECRET=abc123secret...
 
-The MCP server implements both **RFC 9728 (OAuth 2.0 Protected Resource Metadata)** and **RFC 8414 (Authorization Server Metadata)** for automatic OAuth2 discovery, complying with the MCP 2025-06-18 specification.
-
-#### Protected Resource Metadata (RFC 9728) - Required by MCP Spec
-
-MCP clients discover the authorization server by fetching:
-
-```
-GET /.well-known/oauth-protected-resource
+# Example: Tenant "acme-corp"
+TENANT_ACME_CORP_CLIENT_ID=acme-oauth-app
+TENANT_ACME_CORP_CLIENT_SECRET=xyz789secret...
 ```
 
-**Multi-Tenant Example:**
+**Note**: Tenant ID format conversion:
+- URL format: `riccardo-lr-test`
+- Env var format: `RICCARDO_LR_TEST`
+- Server automatically converts between formats
 
-For a deployment at `https://acme.docebosaas.com/mcp`:
+### 3. Docebo OAuth2 App Setup
 
-```json
-{
-  "resource": "https://acme.docebosaas.com/mcp",
-  "authorization_servers": [
-    "https://acme.docebosaas.com/oauth2"
-  ]
-}
-```
+For each tenant, create an OAuth2 app in Docebo:
 
-#### Authorization Server Metadata (RFC 8414)
+1. Log in to Docebo tenant admin
+2. Go to **Admin Menu** → **API & SSO** → **API Credentials**
+3. Click **Add OAuth2 App**
+4. Configure:
+   - **Client ID**: Choose a name (e.g., "mcp-server")
+   - **Client Secret**: Auto-generated by Docebo
+   - **Grant Types**: Select "Authorization Code" and "Refresh Token"
+   - **Redirect URL**: `https://mcp.docebosaas.com/callback` (or your public URL)
+   - **Scopes**: `api`
+5. Save and copy the Client ID and Client Secret
+6. Add to `.env` file using format above
 
-For clients that need detailed authorization server information:
+## Development
 
-```
-GET /.well-known/oauth-authorization-server
-```
+### Local Development with ngrok
 
-Returns:
+1. Start ngrok tunnel:
+   ```bash
+   ngrok http 3000
+   ```
 
-```json
-{
-  "issuer": "https://acme.docebosaas.com/oauth2",
-  "authorization_endpoint": "https://acme.docebosaas.com/oauth2/authorize",
-  "token_endpoint": "https://acme.docebosaas.com/oauth2/token",
-  "scopes_supported": ["api"],
-  "response_types_supported": ["code"],
-  "grant_types_supported": ["authorization_code", "password", "refresh_token"],
-  "code_challenge_methods_supported": ["S256"]
-}
-```
+2. Update `.env` with ngrok URL:
+   ```env
+   SERVER_PUBLIC_URL=https://abc123.ngrok.io
+   ```
 
-#### WWW-Authenticate Header
+3. Start dev server:
+   ```bash
+   npm run dev
+   ```
 
-When authentication fails (401 Unauthorized), the server includes a `WWW-Authenticate` header pointing to the protected resource metadata:
+4. Server will be available at:
+   - `https://abc123.ngrok.io` (public)
+   - `http://localhost:3000` (local)
 
-```
-WWW-Authenticate: Bearer realm="https://acme.docebosaas.com/.well-known/oauth-protected-resource"
-```
+### MCP Client Configuration
 
-Each tenant automatically gets their own OAuth2 endpoints based on their subdomain. No configuration required!
-
-### Example: Claude Desktop Configuration
-
-If your MCP client supports automatic discovery, you can simply configure:
+Configure MCP client (e.g., Claude Desktop) to point to your server:
 
 ```json
 {
   "mcpServers": {
-    "docebo": {
-      "url": "https://acme.docebosaas.com/mcp",
+    "docebo-riccardo": {
+      "url": "https://abc123.ngrok.io/mcp?tenant=riccardo-lr-test",
       "transport": "streamable-http"
     }
   }
 }
 ```
 
-The client will automatically discover OAuth2 endpoints from the `.well-known` endpoint.
+**Key points**:
+- Include `?tenant=<tenant-id>` in the URL
+- MCP client will auto-discover OAuth2 endpoints
+- Client will handle full OAuth2 flow automatically
 
-Alternatively, configure OAuth2 explicitly for each tenant:
+## API Endpoints
+
+### Discovery Endpoints
+
+#### `GET /.well-known/oauth-authorization-server` (RFC 8414)
+
+Returns OAuth2 authorization server metadata:
 
 ```json
 {
-  "mcpServers": {
-    "docebo": {
-      "url": "https://acme.docebosaas.com/mcp",
-      "transport": "streamable-http",
-      "oauth": {
-        "authorizationUrl": "https://acme.docebosaas.com/oauth2/authorize",
-        "tokenUrl": "https://acme.docebosaas.com/oauth2/token",
-        "clientId": "your-docebo-oauth-client-id",
-        "clientSecret": "your-docebo-oauth-client-secret",
-        "scopes": ["api"]
-      }
-    }
-  }
+  "issuer": "https://mcp.docebosaas.com",
+  "authorization_endpoint": "https://mcp.docebosaas.com/oauth2/authorize",
+  "token_endpoint": "https://mcp.docebosaas.com/oauth2/token",
+  "scopes_supported": ["api"],
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token", "password"],
+  "code_challenge_methods_supported": ["S256"]
 }
 ```
 
-### Docebo OAuth2 Setup
+#### `GET /.well-known/oauth-protected-resource` (RFC 9728)
 
-1. In Docebo, go to **Admin Menu** → **API & SSO** → **API Credentials**
-2. Click **Add OAuth2 App**
-3. Configure:
-   - **Client ID**: Create a unique name (e.g., "mcp-client")
-   - **Grant Types**: Check "Authorization Code" and "Password"
-   - **Redirect URL**: For Authorization Code flow, add your client's callback URL
-4. Note the **Client Secret** generated by Docebo
-5. Use these credentials in your MCP client configuration
+Returns protected resource metadata:
 
-## Development
-
-Start the server in watch mode:
-
-```bash
-npm run dev
+```json
+{
+  "resource": "https://mcp.docebosaas.com",
+  "authorization_servers": ["https://mcp.docebosaas.com"],
+  "bearer_methods_supported": ["header"]
+}
 ```
 
-### Using with MCP Inspector
+### OAuth2 Endpoints
 
-The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers locally. You can use it with either **manual token flow** or **full OAuth flow with ngrok**.
+#### `GET /oauth2/authorize?tenant=<tenant-id>&...`
 
-#### Option 1: Full OAuth Flow with Ngrok (Recommended)
+Proxies OAuth2 authorization request to Docebo tenant.
 
-This enables the complete Authorization Code + PKCE OAuth flow by tunneling MCP Inspector's callback port.
+**Required parameters**:
+- `tenant`: Docebo tenant ID (e.g., `riccardo-lr-test`)
+- Standard OAuth2 parameters: `client_id`, `response_type`, `redirect_uri`, `scope`, `state`, `code_challenge`, etc.
 
-**How it works:**
-- Your MCP server runs on `localhost:3000` (no tunnel needed)
-- MCP Inspector runs on `localhost:6274`
-- Ngrok tunnels `localhost:6274` → `https://abc123.ngrok.io`
-- Docebo redirects to the ngrok URL, which tunnels back to MCP Inspector
+**Flow**:
+1. Server encodes tenant into state parameter
+2. Redirects to `https://{tenant}.docebosaas.com/oauth2/authorize`
+3. User authorizes in Docebo
+4. Docebo redirects back with `code` and encoded `state`
 
-**Setup:**
+#### `POST /oauth2/token`
 
-1. **Start your MCP server:**
-   ```bash
-   # Update .env
-   ALLOW_LOCAL_DEV=true
+Proxies OAuth2 token request to Docebo tenant.
 
-   # Start server
-   npm run dev
-   ```
+**Supported grant types**:
+- `authorization_code`: Requires `state` parameter with tenant info
+- `refresh_token`: Requires `?tenant=<id>` query parameter
+- `password`: Requires `?tenant=<id>` query parameter
 
-2. **Start MCP Inspector:**
-   ```bash
-   npx @modelcontextprotocol/inspector streamable-http http://localhost:3000/mcp
-   ```
+**Flow**:
+1. Server extracts tenant from state or query
+2. Injects tenant's client_id and client_secret
+3. Proxies to `https://{tenant}.docebosaas.com/oauth2/token`
+4. Returns token response to client
 
-3. **Start ngrok for MCP Inspector's port:**
-   ```bash
-   # Install ngrok (https://ngrok.com)
-   brew install ngrok  # or download from ngrok.com
+### MCP Endpoint
 
-   # Tunnel MCP Inspector's callback port
-   ngrok http 6274
-   ```
+#### `POST /mcp?tenant=<tenant-id>`
 
-   You'll get a public URL like: `https://abc123.ngrok.io`
+MCP JSON-RPC endpoint.
 
-4. **Configure Docebo OAuth2 app:**
-   - Go to Docebo: **Admin Menu** → **API & SSO** → **API Credentials**
-   - Edit your OAuth2 app (`my-mcp-server`)
-   - Add redirect URI: `https://abc123.ngrok.io/oauth/callback/debug`
-   - Save
+**Headers**:
+- `Authorization: Bearer <access_token>`
+- `Content-Type: application/json`
 
-5. **In MCP Inspector UI:**
-   - Click "Authenticate with OAuth"
-   - MCP Inspector will show you the authorization URL
-   - **Important**: Before clicking, edit the URL to replace:
-     - `redirect_uri=http://localhost:6274/oauth/callback/debug`
-     - With: `redirect_uri=https://abc123.ngrok.io/oauth/callback/debug`
-   - Paste the edited URL in your browser
-   - Log in to Docebo
-   - You'll be redirected back through ngrok to MCP Inspector
-   - MCP Inspector will automatically exchange the code for a token
-
-**Benefits:**
-- ✅ Full OAuth Authorization Code + PKCE flow
-- ✅ Automatic token exchange
-- ✅ Same flow as production
-- ✅ Works around Docebo's redirect URI restrictions
-
----
-
-#### Option 2: Manual Token Flow (Simpler, No ngrok needed)
-
-If you don't want to set up ngrok, you can manually obtain a token.
-
-**Setup:**
-
-1. Enable local dev mode in your `.env`:
-   ```env
-   ALLOW_LOCAL_DEV=true
-   ```
-
-2. **Get an OAuth2 token** from Docebo:
-   ```bash
-   curl -X POST "https://your-tenant.docebosaas.com/oauth2/token" \
-     -d "grant_type=password" \
-     -d "client_id=your_oauth_client_id" \
-     -d "client_secret=your_oauth_client_secret" \
-     -d "username=admin" \
-     -d "password=your_password" \
-     -d "scope=api"
-   ```
-
-   Save the `access_token` from the response.
-
-3. Start the server:
-   ```bash
-   npm run dev
-   ```
-
-4. Run MCP Inspector:
-   ```bash
-   npx @modelcontextprotocol/inspector streamable-http http://localhost:3000/mcp
-   ```
-
-5. **In the Inspector UI:**
-   - When prompted for authentication, **paste the token** from step 2
-   - Or add header: `Authorization: Bearer <access_token>`
-
-**Important**: Always set `ALLOW_LOCAL_DEV=false` in production!
-
-## Production
-
-### Multi-Tenant Deployment
-
-This server is designed for deployment at `<tenantId>.docebosaas.com/mcp`. Each tenant automatically gets their own OAuth2 endpoints without any configuration.
-
-**Example deployments:**
-- `https://acme.docebosaas.com/mcp` → OAuth2 at `https://acme.docebosaas.com/oauth2/*`
-- `https://widgets-inc.docebosaas.com/mcp` → OAuth2 at `https://widgets-inc.docebosaas.com/oauth2/*`
-
-Build and run:
-
-```bash
-npm run build
-npm start
-```
-
-**Production checklist:**
-- ✅ Set `ALLOW_LOCAL_DEV=false` (disable origin validation bypass)
-- ✅ Configure `ALLOWED_ORIGINS` with your MCP client origins
-- ✅ Deploy at `<tenantId>.docebosaas.com/mcp`
-- ✅ Remove or leave empty `OAUTH_AUTHORIZATION_URL` and `OAUTH_TOKEN_URL` (not needed in production)
-
-## Testing
-
-### 1. Get OAuth2 Token from Docebo
-
-```bash
-curl -X POST "https://your-tenant.docebosaas.com/oauth2/token" \
-  -d "grant_type=password" \
-  -d "client_id=your_oauth_client_id" \
-  -d "client_secret=your_oauth_client_secret" \
-  -d "username=admin" \
-  -d "password=your_password" \
-  -d "scope=api"
-```
-
-### 2. Test Docebo API with Token
-
-```bash
-TOKEN="<access_token_from_step_1>"
-
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://your-tenant.docebosaas.com/manage/v1/user?page_size=5"
-```
-
-### 3. Test MCP Server Health
-
-```bash
-curl http://localhost:3000/health
-```
-
-### 4. Test MCP Endpoint with Bearer Token
-
-```bash
-TOKEN="<access_token_from_step_1>"
-
-# Initialize
-curl -X POST http://localhost:3000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Origin: https://claude.ai" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-03-26",
-      "clientInfo": {
-        "name": "test-client",
-        "version": "1.0.0"
-      }
-    }
-  }'
-
-# List tools
-curl -X POST http://localhost:3000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Origin: https://claude.ai" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/list"
-  }'
-
-# Call tool
-curl -X POST http://localhost:3000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Origin: https://claude.ai" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-      "name": "docebo.list_users",
-      "arguments": {
-        "page": 1,
-        "page_size": 5
-      }
-    }
-  }'
-```
-
-## API Reference
-
-### MCP Tool: docebo.list_users
-
-Lists users from Docebo LMS with optional filtering and pagination.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `page` | number | Page number (1-indexed) |
-| `page_size` | number | Users per page (default: 200, max: 200) |
-| `sort_attr` | string | Sort attribute (e.g., "user_id", "username") |
-| `sort_dir` | string | Sort direction: "asc" or "desc" |
-| `search_text` | string | Search filter for username or email |
-
-**Example:**
-
+**Example request**:
 ```json
 {
   "jsonrpc": "2.0",
@@ -419,86 +244,193 @@ Lists users from Docebo LMS with optional filtering and pagination.
   "params": {
     "name": "docebo.list_users",
     "arguments": {
-      "page": 1,
-      "page_size": 10,
-      "search_text": "john"
+      "page_size": 10
     }
   }
 }
 ```
 
+## MCP Tools
+
+### `docebo.list_users`
+
+List users from Docebo LMS.
+
+**Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page` | number | Page number (1-indexed) |
+| `page_size` | number | Users per page (default: 200, max: 200) |
+| `sort_attr` | string | Sort attribute (e.g., "user_id", "username") |
+| `sort_dir` | string | Sort direction: "asc" or "desc" |
+| `search_text` | string | Search filter for username or email |
+
+## Testing
+
+### Test Discovery Endpoint
+
+```bash
+curl https://abc123.ngrok.io/.well-known/oauth-authorization-server | jq .
+```
+
+### Test OAuth2 Flow (Manual)
+
+1. **Start authorization**:
+   ```
+   https://abc123.ngrok.io/oauth2/authorize?tenant=riccardo-lr-test&client_id=test&response_type=code&redirect_uri=http://localhost:3000/callback&scope=api
+   ```
+
+2. **Exchange code for token** (after authorization):
+   ```bash
+   curl -X POST https://abc123.ngrok.io/oauth2/token \
+     -d "grant_type=authorization_code" \
+     -d "code=<authorization_code>" \
+     -d "redirect_uri=http://localhost:3000/callback" \
+     -d "state=<state_from_callback>"
+   ```
+
+3. **Call MCP endpoint**:
+   ```bash
+   TOKEN="<access_token_from_step_2>"
+
+   curl -X POST "https://abc123.ngrok.io/mcp?tenant=riccardo-lr-test" \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "tools/call",
+       "params": {
+         "name": "docebo.list_users",
+         "arguments": {"page_size": 5}
+       }
+     }'
+   ```
+
+## Production Deployment
+
+### Environment Variables
+
+```env
+SERVER_PUBLIC_URL=https://mcp.docebosaas.com
+PORT=3000
+ALLOWED_ORIGINS=*
+ALLOW_LOCAL_DEV=false
+
+# Add all tenant credentials
+TENANT_<ID>_CLIENT_ID=...
+TENANT_<ID>_CLIENT_SECRET=...
+```
+
+### Build and Run
+
+```bash
+npm run build
+npm start
+```
+
+### Deployment Checklist
+
+- [ ] Set `ALLOW_LOCAL_DEV=false`
+- [ ] Use HTTPS (required for OAuth2)
+- [ ] Configure all tenant credentials
+- [ ] Set correct `SERVER_PUBLIC_URL`
+- [ ] Update OAuth2 app redirect URIs in Docebo
+- [ ] Monitor logs for errors
+- [ ] Test with MCP client
+
 ## Security
 
-- **HTTPS Required**: Always use HTTPS in production
-- **API Key Protection**: Keep `MCP_API_KEY` secret
-- **Origin Validation**: Only whitelisted origins are allowed
-- **Token Caching**: OAuth tokens are cached in memory with auto-refresh
-- **No Logging of Secrets**: Tokens and keys are never logged
+- **No Client Secrets Exposed**: Tenant credentials stored server-side only
+- **HTTPS Required**: OAuth2 requires secure connections
+- **State Parameter**: Prevents CSRF attacks
+- **PKCE Support**: Enhanced security for public clients (S256)
+- **Bearer Tokens**: Validated by Docebo on each API call
+- **No Session Storage**: Stateless architecture
 
-## Architecture
+## Troubleshooting
+
+### "Tenant not configured" error
+
+- Check tenant ID format in environment variables
+- Ensure `TENANT_{UPPERCASE}_CLIENT_ID` and `_CLIENT_SECRET` are set
+- Restart server after adding new tenants
+
+### "Invalid credentials" from Docebo
+
+- Verify client_id and client_secret are correct
+- Check OAuth2 app is active in Docebo
+- Ensure grant types are enabled in Docebo app
+
+### OAuth redirect issues
+
+- Verify `SERVER_PUBLIC_URL` is correct
+- Check redirect URI matches in Docebo OAuth2 app
+- For ngrok, update URL after tunnel restart
+
+### CORS errors
+
+- Set `ALLOWED_ORIGINS=*` for testing
+- Check `ALLOW_LOCAL_DEV=true` for local development
+
+## Architecture Details
+
+### Multi-Tenant Credential Storage
+
+Credentials are stored in environment variables with naming convention:
 
 ```
-┌─────────────────┐
-│  MCP Client     │ (Claude.ai, ChatGPT, etc.)
-│  (Browser)      │
-└────────┬────────┘
-         │ HTTPS + API Key
-         │
-┌────────▼────────┐
-│  Express Server │
-│  - Origin Check │
-│  - API Key Auth │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  MCP Handler    │
-│  (JSON-RPC)     │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  OAuth Manager  │
-│  (Token Cache)  │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  Docebo API     │
-│  /manage/v1/*   │
-└─────────────────┘
+TENANT_{TENANT_ID_UPPERCASE_WITH_UNDERSCORES}_CLIENT_ID
+TENANT_{TENANT_ID_UPPERCASE_WITH_UNDERSCORES}_CLIENT_SECRET
 ```
 
-## Project Structure
+Conversion examples:
+- `riccardo-lr-test` → `TENANT_RICCARDO_LR_TEST_CLIENT_ID`
+- `acme-corp` → `TENANT_ACME_CORP_CLIENT_ID`
+- `test-123` → `TENANT_TEST_123_CLIENT_ID`
+
+### State Parameter Encoding
+
+The server encodes tenant information in the OAuth2 `state` parameter:
+
+```typescript
+{
+  tenant: "riccardo-lr-test",
+  original: "<client_original_state>"
+}
+```
+
+Encoded as base64url JSON. This allows the server to:
+1. Route token requests to correct tenant
+2. Inject correct credentials
+3. Preserve client's original state
+
+### File Structure
 
 ```
-dcbo-mcp-server/
-├── src/
-│   ├── config.ts       # Environment validation & dynamic endpoint detection
-│   ├── oauth.ts        # Token management
-│   ├── docebo.ts       # Docebo API client
-│   ├── mcp.ts          # JSON-RPC handler
-│   └── server.ts       # Express app with OAuth2 discovery
-├── .env.example
-├── ENHANCEMENTS.md     # Future enhancement ideas
-├── package.json
-├── tsconfig.json
-└── README.md
+src/
+├── config.ts          # Server configuration
+├── tenants.ts         # Multi-tenant credential management
+├── oauth-proxy.ts     # OAuth2 authorize & token proxy
+├── server.ts          # Express app with all endpoints
+├── mcp.ts             # MCP JSON-RPC handler
+└── docebo.ts          # Docebo API client
 ```
 
-## How It Works
+## Future Enhancements
 
-### Multi-Tenant OAuth2 Detection
+See [ENHANCEMENTS.md](ENHANCEMENTS.md) for planned improvements:
 
-The server automatically detects which tenant it's serving based on the `Host` header:
-
-1. Client requests: `https://acme.docebosaas.com/mcp/.well-known/oauth-authorization-server`
-2. Server extracts hostname: `acme.docebosaas.com`
-3. Server constructs tenant-specific endpoints:
-   - `issuer`: `https://acme.docebosaas.com/oauth2`
-   - `authorization_endpoint`: `https://acme.docebosaas.com/oauth2/authorize`
-   - `token_endpoint`: `https://acme.docebosaas.com/oauth2/token`
-4. Returns discovery metadata with tenant-specific URLs
-
-For localhost development, the server falls back to `.env` configuration.
+- Tenant validation before proxying
+- Dynamic tenant registration via admin API
+- OAuth2 token caching
+- Rate limiting
+- Enhanced monitoring and logging
 
 ## License
 
 MIT
+
+## Support
+
+For issues and questions, please file a GitHub issue.
