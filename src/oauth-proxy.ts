@@ -5,7 +5,6 @@
 
 import { Request, Response } from 'express';
 import { getTenantConfig, getTenantOAuthEndpoints } from './tenants.js';
-import { appConfig } from './config.js';
 
 interface OAuthState {
   tenant: string;

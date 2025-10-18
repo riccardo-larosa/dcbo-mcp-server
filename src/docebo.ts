@@ -3,7 +3,7 @@
  * Handles authenticated API calls using client-provided tokens
  */
 
-import { appConfig } from './config.js';
+import { getTenantApiUrl } from './tenants.js';
 
 export interface DoceboUser {
   user_id: number;
@@ -35,7 +35,14 @@ export interface ListUsersParams {
 /**
  * List users from Docebo
  */
-export async function listUsers(params: ListUsersParams = {}, bearerToken: string): Promise<ListUsersResponse> {
+export async function listUsers(params: ListUsersParams = {}, bearerToken: string, tenant: string): Promise<ListUsersResponse> {
+  // Get tenant API URL
+  const baseUrl = getTenantApiUrl(tenant);
+
+  if (!baseUrl) {
+    throw new Error(`Tenant '${tenant}' is not configured`);
+  }
+
   // Build query string
   const queryParams = new URLSearchParams();
   if (params.page) queryParams.set('page', params.page.toString());
@@ -44,7 +51,7 @@ export async function listUsers(params: ListUsersParams = {}, bearerToken: strin
   if (params.sort_dir) queryParams.set('sort_dir', params.sort_dir);
   if (params.search_text) queryParams.set('search_text', params.search_text);
 
-  const url = `${appConfig.docebo.baseUrl}/manage/v1/user?${queryParams.toString()}`;
+  const url = `${baseUrl}/manage/v1/user?${queryParams.toString()}`;
 
   console.log('[Docebo] Fetching users from', url);
 

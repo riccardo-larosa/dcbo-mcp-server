@@ -1,16 +1,20 @@
 /**
- * Express server with security middleware
- * Exposes MCP JSON-RPC endpoint at /mcp
+ * Express server with OAuth2 proxy and MCP endpoint
+ * Acts as OAuth2 authorization server proxy for Docebo tenants
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { appConfig, getOAuthEndpoints } from './config.js';
+import { appConfig } from './config.js';
 import { handleMcpRequest } from './mcp.js';
+import { handleAuthorize, handleToken } from './oauth-proxy.js';
 
 const app = express();
 
 // Parse JSON bodies
 app.use(express.json());
+
+// Parse URL-encoded bodies (for OAuth2 token requests)
+app.use(express.urlencoded({ extended: true }));
 
 /**
  * Security middleware: validate Origin header
@@ -24,35 +28,24 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
 
     // Set permissive CORS headers for local dev
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     next();
     return;
   }
 
-  // Production mode: strict origin validation
-  if (!origin) {
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Origin header is required',
-    });
-    return;
+  // Production mode: Check allowed origins
+  if (origin && appConfig.server.allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  } else if (appConfig.server.allowedOrigins.includes('*')) {
+    // Allow all if configured
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
-
-  if (!appConfig.server.allowedOrigins.includes(origin)) {
-    console.warn('[Security] Blocked request from unauthorized origin:', origin);
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Origin not allowed',
-    });
-    return;
-  }
-
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   next();
 }
@@ -64,13 +57,7 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
 function extractBearerToken(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
-  // Build WWW-Authenticate header per RFC 9728
-  const host = req.headers.host || 'localhost';
-  const protocol = host.startsWith('localhost') ? 'http' : 'https';
-  const metadataUrl = `${protocol}://${host}/.well-known/oauth-protected-resource`;
-
   if (!authHeader) {
-    res.setHeader('WWW-Authenticate', `Bearer realm="${metadataUrl}"`);
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authorization header is required',
@@ -81,7 +68,6 @@ function extractBearerToken(req: Request, res: Response, next: NextFunction): vo
   // Expected format: "Bearer <token>"
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    res.setHeader('WWW-Authenticate', `Bearer realm="${metadataUrl}", error="invalid_token"`);
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Invalid Authorization format. Expected: Bearer <token>',
@@ -106,329 +92,79 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * Helper function to handle OAuth2 discovery request
- * Shared between GET and OPTIONS handlers
- */
-function handleOAuthDiscovery(req: Request, res: Response): void {
-  // Extract hostname from Host header
-  const host = req.headers.host || 'localhost';
-  const hostname = host.split(':')[0]; // Remove port if present
-
-  try {
-    const endpoints = getOAuthEndpoints(hostname);
-
-    // Set CORS headers for MCP Inspector and other clients
-    const origin = req.headers.origin;
-    if (appConfig.server.allowLocalDev) {
-      res.setHeader('Access-Control-Allow-Origin', origin || '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-    }
-
-    const metadata: any = {
-      issuer: endpoints.issuer,
-      authorization_endpoint: endpoints.authorizationEndpoint,
-      token_endpoint: endpoints.tokenEndpoint,
-      scopes_supported: ['api'],
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
-      code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    };
-
-    // Include pre-registered client credentials if configured
-    // This signals to MCP Inspector to use static credentials instead of dynamic registration
-    if (appConfig.oauth.clientId) {
-      metadata.client_id = appConfig.oauth.clientId;
-    }
-    if (appConfig.oauth.clientSecret) {
-      metadata.client_secret = appConfig.oauth.clientSecret;
-    }
-
-    res.json(metadata);
-  } catch (error) {
-    console.error('[OAuth Discovery] Error getting endpoints:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: error instanceof Error ? error.message : 'Failed to determine OAuth endpoints',
-    });
-  }
-}
-
-/**
  * OAuth2 Authorization Server Metadata (RFC 8414)
- * Allows MCP clients to discover the authorization server capabilities
- *
- * Dynamically returns tenant-specific endpoints based on the Host header:
- * - For *.docebosaas.com: returns endpoints at https://<tenant>.docebosaas.com/oauth2
- * - For localhost: uses .env configuration
+ * Describes the OAuth2 endpoints this server provides
  */
-app.options('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
-  const origin = req.headers.origin;
-  if (appConfig.server.allowLocalDev) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-  }
-  res.status(204).end();
-});
-
-app.get('/.well-known/oauth-authorization-server', handleOAuthDiscovery);
-
-/**
- * Helper function to handle protected resource metadata request
- */
-function handleProtectedResourceMetadata(req: Request, res: Response): void {
-  // Extract hostname from Host header
-  const host = req.headers.host || 'localhost';
-  const hostname = host.split(':')[0];
-  const protocol = hostname === 'localhost' || hostname === '127.0.0.1' ? 'http' : 'https';
-
-  try {
-    const endpoints = getOAuthEndpoints(hostname);
-
-    // Set CORS headers for MCP Inspector and other clients
-    const origin = req.headers.origin;
-    if (appConfig.server.allowLocalDev) {
-      res.setHeader('Access-Control-Allow-Origin', origin || '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-    }
-
-    res.json({
-      resource: `${protocol}://${host}/mcp`,
-      authorization_servers: [endpoints.issuer]
-    });
-  } catch (error) {
-    console.error('[Protected Resource Metadata] Error getting endpoints:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: error instanceof Error ? error.message : 'Failed to determine authorization servers',
-    });
-  }
-}
-
-/**
- * OAuth2 Protected Resource Metadata (RFC 9728)
- * MCP servers act as OAuth2 Resource Servers and must advertise their authorization servers
- *
- * This endpoint is required by MCP spec 2025-06-18
- * MCP Inspector may request both /.well-known/oauth-protected-resource and
- * /.well-known/oauth-protected-resource/mcp
- */
-app.options('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
-  const origin = req.headers.origin;
-  if (appConfig.server.allowLocalDev) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-  }
-  res.status(204).end();
-});
-
-app.get('/.well-known/oauth-protected-resource', handleProtectedResourceMetadata);
-
-// MCP Inspector may append /mcp to the protected resource URL
-app.options('/.well-known/oauth-protected-resource/mcp', (req: Request, res: Response) => {
-  const origin = req.headers.origin;
-  if (appConfig.server.allowLocalDev) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-  }
-  res.status(204).end();
-});
-
-app.get('/.well-known/oauth-protected-resource/mcp', handleProtectedResourceMetadata);
-
-/**
- * OAuth2 Authorization Server Metadata at /oauth2 path (for MCP Inspector)
- *
- * In local development, MCP Inspector will request this endpoint based on the
- * authorization_servers value from /.well-known/oauth-protected-resource
- *
- * This endpoint returns metadata with localhost URLs but describes the real
- * Docebo OAuth server capabilities. Users must manually obtain tokens from
- * Docebo and paste them into MCP Inspector.
- */
-app.options('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
-  const origin = req.headers.origin;
-  if (appConfig.server.allowLocalDev) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-  }
-  res.status(204).end();
-});
-
-app.get('/oauth2/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
-  // Return localhost URLs to avoid CORS issues with Docebo
-  // The localhost /oauth2/* endpoints proxy requests to Docebo
-  const host = req.headers.host || 'localhost';
-  const protocol = host.startsWith('localhost') ? 'http' : 'https';
-
-  // Set CORS headers for MCP Inspector
-  const origin = req.headers.origin;
-  if (appConfig.server.allowLocalDev) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-protocol-version');
-  }
-
+app.get('/.well-known/oauth-authorization-server', validateOrigin, (_req: Request, res: Response) => {
   res.json({
-    issuer: `${protocol}://${host}/oauth2`,
-    authorization_endpoint: `${protocol}://${host}/oauth2/authorize`,
-    token_endpoint: `${protocol}://${host}/oauth2/token`,
+    issuer: appConfig.server.publicUrl,
+    authorization_endpoint: `${appConfig.server.publicUrl}/oauth2/authorize`,
+    token_endpoint: `${appConfig.server.publicUrl}/oauth2/token`,
     scopes_supported: ['api'],
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code', 'password', 'refresh_token'],
+    grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
   });
 });
 
 /**
- * OAuth2 Authorization Endpoint Proxy (for ngrok/tunnel usage)
- *
- * Proxies authorization requests to Docebo OAuth server.
- * Used when MCP Inspector connects via ngrok tunnel.
- *
- * Flow:
- * 1. MCP Inspector → https://your-tunnel.ngrok.io/oauth2/authorize
- * 2. This endpoint → Redirects to Docebo OAuth
- * 3. User logs in at Docebo
- * 4. Docebo → Redirects to https://your-tunnel.ngrok.io/oauth2/callback
+ * OAuth2 Protected Resource Metadata (RFC 9728)
+ * Indicates which authorization server protects this resource
  */
-app.get('/oauth2/authorize', (req: Request, res: Response) => {
-  const doceboBaseUrl = appConfig.docebo.baseUrl;
-
-  // Build the Docebo authorization URL with all query parameters
-  const doceboAuthUrl = new URL(`${doceboBaseUrl}/oauth2/authorize`);
-
-  // Copy all query parameters from the request
-  Object.entries(req.query).forEach(([key, value]) => {
-    if (typeof value === 'string') {
-      doceboAuthUrl.searchParams.set(key, value);
-    }
+app.get('/.well-known/oauth-protected-resource', validateOrigin, (_req: Request, res: Response) => {
+  res.json({
+    resource: appConfig.server.publicUrl,
+    authorization_servers: [appConfig.server.publicUrl],
+    bearer_methods_supported: ['header'],
+    resource_documentation: `${appConfig.server.publicUrl}/docs`,
   });
-
-  console.log('[OAuth Proxy] Redirecting to Docebo authorize:', doceboAuthUrl.toString());
-
-  // Redirect to Docebo OAuth
-  res.redirect(doceboAuthUrl.toString());
 });
 
 /**
- * OAuth2 Callback Endpoint (for ngrok/tunnel usage)
- *
- * Handles the redirect back from Docebo after user authorization.
- * Exchanges the authorization code for an access token.
+ * OAuth2 Authorization endpoint (proxy to Docebo)
+ * Requires: ?tenant=<tenant-id>
  */
-app.get('/oauth2/callback', async (req: Request, res: Response) => {
-  const { code, state, error, error_description } = req.query;
-
-  // Handle OAuth errors
-  if (error) {
-    console.error('[OAuth Callback] Error from Docebo:', error, error_description);
-    res.status(400).send(`OAuth Error: ${error} - ${error_description}`);
-    return;
-  }
-
-  if (!code || typeof code !== 'string') {
-    res.status(400).send('Missing authorization code');
-    return;
-  }
-
-  console.log('[OAuth Callback] Received authorization code, state:', state);
-
-  // For now, just display the code - MCP Inspector needs to handle the actual exchange
-  // In a full implementation, we'd exchange the code for a token here
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>OAuth Callback</title>
-      <style>
-        body { font-family: system-ui; padding: 2rem; max-width: 600px; margin: 0 auto; }
-        code { background: #f5f5f5; padding: 0.2rem 0.4rem; border-radius: 3px; }
-        .success { color: #059669; }
-      </style>
-    </head>
-    <body>
-      <h1 class="success">✓ Authorization Successful</h1>
-      <p>Received authorization code from Docebo.</p>
-      <p><strong>Code:</strong> <code>${code}</code></p>
-      <p><strong>State:</strong> <code>${state || 'none'}</code></p>
-      <p>You can close this window and return to MCP Inspector.</p>
-      <script>
-        // Attempt to send message to opener (MCP Inspector)
-        if (window.opener) {
-          window.opener.postMessage({
-            type: 'oauth-callback',
-            code: '${code}',
-            state: '${state || ''}'
-          }, '*');
-        }
-      </script>
-    </body>
-    </html>
-  `);
+app.get('/oauth2/authorize', validateOrigin, async (req: Request, res: Response) => {
+  await handleAuthorize(req, res);
 });
 
 /**
- * OAuth2 Token Endpoint Proxy (for ngrok/tunnel usage)
- *
- * Proxies token requests to Docebo OAuth server.
- * Exchanges authorization code for access token.
+ * OAuth2 Token endpoint (proxy to Docebo)
  */
-app.post('/oauth2/token', async (req: Request, res: Response) => {
-  const doceboBaseUrl = appConfig.docebo.baseUrl;
-  const doceboTokenUrl = `${doceboBaseUrl}/oauth2/token`;
-
-  console.log('[OAuth Token Proxy] Proxying token request to Docebo');
-
-  try {
-    // Forward the token request to Docebo
-    const response = await fetch(doceboTokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams(req.body).toString(),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error('[OAuth Token Proxy] Error from Docebo:', data);
-      res.status(response.status).json(data);
-      return;
-    }
-
-    console.log('[OAuth Token Proxy] Successfully exchanged code for token');
-    res.json(data);
-  } catch (error) {
-    console.error('[OAuth Token Proxy] Error proxying to Docebo:', error);
-    res.status(500).json({
-      error: 'proxy_error',
-      error_description: 'Failed to proxy token request to Docebo',
-    });
-  }
+app.post('/oauth2/token', validateOrigin, async (req: Request, res: Response) => {
+  await handleToken(req, res);
 });
 
 /**
  * OPTIONS handler for CORS preflight
  */
-app.options('/mcp', validateOrigin, (_req: Request, res: Response) => {
+app.options('*', validateOrigin, (_req: Request, res: Response) => {
   res.status(204).end();
 });
 
 /**
  * MCP JSON-RPC endpoint
+ * Requires: ?tenant=<tenant-id>
+ * Requires: Authorization: Bearer <token>
  */
 app.post('/mcp', validateOrigin, extractBearerToken, async (req: Request, res: Response) => {
   try {
     const request = req.body;
+    const tenant = req.query.tenant as string;
+
+    // Validate tenant parameter
+    if (!tenant) {
+      res.status(400).json({
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32600,
+          message: 'Missing required query parameter: tenant',
+        },
+      });
+      return;
+    }
 
     // Validate JSON-RPC structure
     if (!request || typeof request !== 'object' || !request.method) {
@@ -443,8 +179,8 @@ app.post('/mcp', validateOrigin, extractBearerToken, async (req: Request, res: R
       return;
     }
 
-    // Handle the request with the bearer token
-    const response = await handleMcpRequest(request, res.locals.bearerToken);
+    // Handle the request with the bearer token and tenant
+    const response = await handleMcpRequest(request, res.locals.bearerToken, tenant);
 
     res.json(response);
   } catch (error) {
@@ -467,7 +203,15 @@ app.post('/mcp', validateOrigin, extractBearerToken, async (req: Request, res: R
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
     error: 'Not Found',
-    message: 'Endpoint not found. Try POST /mcp',
+    message: 'Endpoint not found',
+    available_endpoints: {
+      health: 'GET /health',
+      oauth_discovery: 'GET /.well-known/oauth-authorization-server',
+      resource_discovery: 'GET /.well-known/oauth-protected-resource',
+      authorize: 'GET /oauth2/authorize?tenant=<tenant-id>',
+      token: 'POST /oauth2/token',
+      mcp: 'POST /mcp?tenant=<tenant-id>',
+    },
   });
 });
 
@@ -490,8 +234,16 @@ const port = appConfig.server.port;
 
 app.listen(port, () => {
   console.log('='.repeat(60));
-  console.log(`[Server] Docebo MCP Server running on port ${port}`);
-  console.log(`[Server] MCP endpoint: http://localhost:${port}/mcp`);
-  console.log(`[Server] Health check: http://localhost:${port}/health`);
+  console.log(`[Server] Docebo MCP OAuth2 Proxy Server`);
+  console.log(`[Server] Running on port ${port}`);
+  console.log(`[Server] Public URL: ${appConfig.server.publicUrl}`);
+  console.log('='.repeat(60));
+  console.log('[Server] Endpoints:');
+  console.log(`  Health:      GET  /health`);
+  console.log(`  OAuth Discovery: GET  /.well-known/oauth-authorization-server`);
+  console.log(`  Resource Meta:   GET  /.well-known/oauth-protected-resource`);
+  console.log(`  Authorize:   GET  /oauth2/authorize?tenant=<id>&...`);
+  console.log(`  Token:       POST /oauth2/token`);
+  console.log(`  MCP:         POST /mcp?tenant=<id>`);
   console.log('='.repeat(60));
 });
