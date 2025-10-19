@@ -54,7 +54,7 @@ export const appConfig = validateEnv();
 
 // Log loaded config (without secrets)
 console.log('[Config] Loaded configuration:', {
-  serverPort: appConfig.server.port,
+  //serverPort: appConfig.server.port,
   serverPublicUrl: appConfig.server.publicUrl,
   allowedOrigins: appConfig.server.allowedOrigins,
   allowLocalDev: appConfig.server.allowLocalDev,

@@ -57,12 +57,22 @@ export async function handleAuthorize(req: Request, res: Response): Promise<void
   console.log(`[OAuth Proxy] Authorize request for tenant: ${tenant}`);
 
   // Get tenant configuration
-  const tenantEndpoints = getTenantOAuthEndpoints(tenant);
+  const tenantConfig = getTenantConfig(tenant);
 
-  if (!tenantEndpoints) {
+  if (!tenantConfig) {
     res.status(404).json({
       error: 'invalid_request',
       error_description: `Tenant '${tenant}' is not configured`,
+    });
+    return;
+  }
+
+  const tenantEndpoints = getTenantOAuthEndpoints(tenant);
+
+  if (!tenantEndpoints) {
+    res.status(500).json({
+      error: 'server_error',
+      error_description: 'Failed to get tenant endpoints',
     });
     return;
   }
@@ -74,12 +84,16 @@ export async function handleAuthorize(req: Request, res: Response): Promise<void
   // Build authorization URL for Docebo
   const authUrl = new URL(tenantEndpoints.authorizationUrl);
 
-  // Forward all OAuth parameters except tenant
+  // Forward all OAuth parameters except tenant and client_id
+  // We'll replace client_id with Docebo's actual client_id
   Object.entries(oauthParams).forEach(([key, value]) => {
-    if (key !== 'state' && value) {
+    if (key !== 'state' && key !== 'client_id' && value) {
       authUrl.searchParams.set(key, String(value));
     }
   });
+
+  // Inject Docebo's client_id
+  authUrl.searchParams.set('client_id', tenantConfig.credentials.clientId);
 
   // Set our encoded state
   authUrl.searchParams.set('state', newState);

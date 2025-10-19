@@ -31,6 +31,12 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+    // Handle OPTIONS preflight
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+
     next();
     return;
   }
@@ -45,6 +51,12 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+
+  // Handle OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
   }
 
   next();
@@ -92,14 +104,15 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * OAuth2 Authorization Server Metadata (RFC 8414)
- * Describes the OAuth2 endpoints this server provides
+ * OAuth2 Authorization Server Metadata (RFC 8414) - Root level
+ * When accessed from root, we need the full MCP path in the request
  */
 app.get('/.well-known/oauth-authorization-server', validateOrigin, (_req: Request, res: Response) => {
+  // Default response - client should specify tenant in the resource path
   res.json({
     issuer: appConfig.server.publicUrl,
-    authorization_endpoint: `${appConfig.server.publicUrl}/oauth2/authorize`,
-    token_endpoint: `${appConfig.server.publicUrl}/oauth2/token`,
+    authorization_endpoint: `${appConfig.server.publicUrl}/mcp/{tenant}/oauth2/authorize`,
+    token_endpoint: `${appConfig.server.publicUrl}/mcp/{tenant}/oauth2/token`,
     scopes_supported: ['api'],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
@@ -109,8 +122,7 @@ app.get('/.well-known/oauth-authorization-server', validateOrigin, (_req: Reques
 });
 
 /**
- * OAuth2 Protected Resource Metadata (RFC 9728)
- * Indicates which authorization server protects this resource
+ * OAuth2 Protected Resource Metadata (RFC 9728) - Root level
  */
 app.get('/.well-known/oauth-protected-resource', validateOrigin, (_req: Request, res: Response) => {
   res.json({
@@ -122,36 +134,98 @@ app.get('/.well-known/oauth-protected-resource', validateOrigin, (_req: Request,
 });
 
 /**
- * OAuth2 Authorization endpoint (proxy to Docebo)
- * Requires: ?tenant=<tenant-id>
+ * OAuth2 Authorization Server Metadata (RFC 8414) - Tenant-specific path
+ * Path: /mcp/:tenant/.well-known/oauth-authorization-server
  */
-app.get('/oauth2/authorize', validateOrigin, async (req: Request, res: Response) => {
+app.get('/mcp/:tenant/.well-known/oauth-authorization-server', validateOrigin, (req: Request, res: Response) => {
+  const tenant = req.params.tenant;
+  const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
+  res.json({
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/oauth2/authorize`,
+    token_endpoint: `${baseUrl}/oauth2/token`,
+    scopes_supported: ['api'],
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
+    code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+  });
+});
+
+/**
+ * OAuth2 Protected Resource Metadata (RFC 9728) - Tenant-specific path
+ * Path: /mcp/:tenant/.well-known/oauth-protected-resource
+ */
+app.get('/mcp/:tenant/.well-known/oauth-protected-resource', validateOrigin, (req: Request, res: Response) => {
+  const tenant = req.params.tenant;
+  const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
+  res.json({
+    resource: baseUrl,
+    authorization_servers: [baseUrl],
+    bearer_methods_supported: ['header'],
+    resource_documentation: `${appConfig.server.publicUrl}/docs`,
+  });
+});
+
+/**
+ * OAuth2 Authorization endpoint (proxy to Docebo) - Tenant-specific
+ * Path: /mcp/:tenant/oauth2/authorize
+ */
+app.get('/mcp/:tenant/oauth2/authorize', validateOrigin, async (req: Request, res: Response) => {
+  // Add tenant from path to query params for handleAuthorize
+  req.query.tenant = req.params.tenant;
   await handleAuthorize(req, res);
 });
 
 /**
- * OAuth2 Token endpoint (proxy to Docebo)
+ * OAuth2 Token endpoint (proxy to Docebo) - Tenant-specific
+ * Path: /mcp/:tenant/oauth2/token
  */
-app.post('/oauth2/token', validateOrigin, async (req: Request, res: Response) => {
+app.post('/mcp/:tenant/oauth2/token', validateOrigin, async (req: Request, res: Response) => {
+  // Add tenant from path to query params for handleToken
+  req.query.tenant = req.params.tenant;
   await handleToken(req, res);
 });
 
 /**
- * OPTIONS handler for CORS preflight
+ * HEAD endpoint for MCP - allows clients to check if endpoint exists
  */
-app.options('*', validateOrigin, (_req: Request, res: Response) => {
-  res.status(204).end();
+app.head('/mcp/:tenant', validateOrigin, (_req: Request, res: Response) => {
+  res.status(200).end();
 });
 
 /**
- * MCP JSON-RPC endpoint
- * Requires: ?tenant=<tenant-id>
+ * GET endpoint for MCP - return endpoint information
+ */
+app.get('/mcp/:tenant', validateOrigin, (req: Request, res: Response) => {
+  const tenant = req.params.tenant;
+  const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
+  res.json({
+    name: 'Docebo MCP Server',
+    version: '1.0.0',
+    tenant: tenant,
+    endpoints: {
+      mcp: `POST ${baseUrl}`,
+      oauth_authorization: `GET ${baseUrl}/oauth2/authorize`,
+      oauth_token: `POST ${baseUrl}/oauth2/token`,
+      oauth_discovery: `GET ${baseUrl}/.well-known/oauth-authorization-server`,
+      resource_metadata: `GET ${baseUrl}/.well-known/oauth-protected-resource`,
+    },
+  });
+});
+
+/**
+ * MCP JSON-RPC endpoint - Tenant-specific
+ * Path: /mcp/:tenant
  * Requires: Authorization: Bearer <token>
  */
-app.post('/mcp', validateOrigin, extractBearerToken, async (req: Request, res: Response) => {
+app.post('/mcp/:tenant', validateOrigin, extractBearerToken, async (req: Request, res: Response) => {
   try {
     const request = req.body;
-    const tenant = req.query.tenant as string;
+    const tenant = req.params.tenant;
 
     // Validate tenant parameter
     if (!tenant) {
@@ -160,7 +234,7 @@ app.post('/mcp', validateOrigin, extractBearerToken, async (req: Request, res: R
         id: null,
         error: {
           code: -32600,
-          message: 'Missing required query parameter: tenant',
+          message: 'Missing required path parameter: tenant',
         },
       });
       return;
@@ -206,11 +280,11 @@ app.use((_req: Request, res: Response) => {
     message: 'Endpoint not found',
     available_endpoints: {
       health: 'GET /health',
-      oauth_discovery: 'GET /.well-known/oauth-authorization-server',
-      resource_discovery: 'GET /.well-known/oauth-protected-resource',
-      authorize: 'GET /oauth2/authorize?tenant=<tenant-id>',
-      token: 'POST /oauth2/token',
-      mcp: 'POST /mcp?tenant=<tenant-id>',
+      oauth_discovery: 'GET /mcp/<tenant>/.well-known/oauth-authorization-server',
+      resource_discovery: 'GET /mcp/<tenant>/.well-known/oauth-protected-resource',
+      authorize: 'GET /mcp/<tenant>/oauth2/authorize',
+      token: 'POST /mcp/<tenant>/oauth2/token',
+      mcp: 'POST /mcp/<tenant>',
     },
   });
 });
@@ -238,12 +312,15 @@ app.listen(port, () => {
   console.log(`[Server] Running on port ${port}`);
   console.log(`[Server] Public URL: ${appConfig.server.publicUrl}`);
   console.log('='.repeat(60));
-  console.log('[Server] Endpoints:');
-  console.log(`  Health:      GET  /health`);
-  console.log(`  OAuth Discovery: GET  /.well-known/oauth-authorization-server`);
-  console.log(`  Resource Meta:   GET  /.well-known/oauth-protected-resource`);
-  console.log(`  Authorize:   GET  /oauth2/authorize?tenant=<id>&...`);
-  console.log(`  Token:       POST /oauth2/token`);
-  console.log(`  MCP:         POST /mcp?tenant=<id>`);
+  console.log('[Server] Tenant-specific Endpoints (replace <tenant> with tenant ID):');
+  console.log(`  Health:          GET  /health`);
+  console.log(`  OAuth Discovery: GET  /mcp/<tenant>/.well-known/oauth-authorization-server`);
+  console.log(`  Resource Meta:   GET  /mcp/<tenant>/.well-known/oauth-protected-resource`);
+  console.log(`  Authorize:       GET  /mcp/<tenant>/oauth2/authorize`);
+  console.log(`  Token:           POST /mcp/<tenant>/oauth2/token`);
+  console.log(`  MCP:             POST /mcp/<tenant>`);
+  console.log('='.repeat(60));
+  console.log('[Server] Example for tenant "riccardo-lr-test":');
+  console.log(`  ${appConfig.server.publicUrl}/mcp/riccardo-lr-test`);
   console.log('='.repeat(60));
 });
