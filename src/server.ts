@@ -16,6 +16,9 @@ app.use(express.json());
 // Parse URL-encoded bodies (for OAuth2 token requests)
 app.use(express.urlencoded({ extended: true }));
 
+// Apply CORS middleware globally to handle ALL requests including 404s
+app.use(validateOrigin);
+
 /**
  * Security middleware: validate Origin header
  */
@@ -26,10 +29,10 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
   if (appConfig.server.allowLocalDev) {
     console.log('[Security] Local dev mode - allowing request from:', origin || 'no-origin');
 
-    // Set permissive CORS headers for local dev
+    // Set permissive CORS headers for local dev (including MCP-specific headers)
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-protocol-version, ngrok-skip-browser-warning');
 
     // Handle OPTIONS preflight
     if (req.method === 'OPTIONS') {
@@ -44,13 +47,13 @@ function validateOrigin(req: Request, res: Response, next: NextFunction): void {
   // Production mode: Check allowed origins
   if (origin && appConfig.server.allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-protocol-version, ngrok-skip-browser-warning');
   } else if (appConfig.server.allowedOrigins.includes('*')) {
     // Allow all if configured
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-protocol-version, ngrok-skip-browser-warning');
   }
 
   // Handle OPTIONS preflight
@@ -125,6 +128,18 @@ app.get('/.well-known/oauth-authorization-server', validateOrigin, (_req: Reques
  * OAuth2 Protected Resource Metadata (RFC 9728) - Root level
  */
 app.get('/.well-known/oauth-protected-resource', validateOrigin, (_req: Request, res: Response) => {
+  res.json({
+    resource: appConfig.server.publicUrl,
+    authorization_servers: [appConfig.server.publicUrl],
+    bearer_methods_supported: ['header'],
+    resource_documentation: `${appConfig.server.publicUrl}/docs`,
+  });
+});
+
+/**
+ * Inspector tries weird path patterns - handle them
+ */
+app.get('/.well-known/oauth-protected-resource/mcp/:tenant', validateOrigin, (_req: Request, res: Response) => {
   res.json({
     resource: appConfig.server.publicUrl,
     authorization_servers: [appConfig.server.publicUrl],
