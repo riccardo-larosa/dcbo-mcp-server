@@ -43,13 +43,22 @@ function decodeState(encodedState: string): OAuthState | null {
  * - All other OAuth2 parameters are forwarded to Docebo
  */
 export async function handleAuthorize(req: Request, res: Response): Promise<void> {
-  const { tenant, ...oauthParams } = req.query;
+  let { tenant, resource, ...oauthParams } = req.query;
+
+  // If tenant not provided directly, try to extract from resource parameter
+  if (!tenant && resource && typeof resource === 'string') {
+    const match = resource.match(/\/mcp\/([^/?]+)/);
+    if (match) {
+      tenant = match[1];
+      console.log(`[OAuth Proxy] Extracted tenant from resource parameter: ${tenant}`);
+    }
+  }
 
   // Validate tenant parameter
   if (!tenant || typeof tenant !== 'string') {
     res.status(400).json({
       error: 'invalid_request',
-      error_description: 'Missing required parameter: tenant',
+      error_description: 'Missing required parameter: tenant (provide either ?tenant=X or ?resource=.../mcp/X)',
     });
     return;
   }
@@ -84,16 +93,24 @@ export async function handleAuthorize(req: Request, res: Response): Promise<void
   // Build authorization URL for Docebo
   const authUrl = new URL(tenantEndpoints.authorizationUrl);
 
-  // Forward all OAuth parameters except tenant and client_id
-  // We'll replace client_id with Docebo's actual client_id
+  // Forward all OAuth parameters except tenant, client_id, and redirect_uri
+  // We'll replace client_id and redirect_uri with Docebo's configured values
   Object.entries(oauthParams).forEach(([key, value]) => {
-    if (key !== 'state' && key !== 'client_id' && value) {
+    if (key !== 'state' && key !== 'client_id' && key !== 'redirect_uri' && key !== 'resource' && value) {
       authUrl.searchParams.set(key, String(value));
     }
   });
 
   // Inject Docebo's client_id
   authUrl.searchParams.set('client_id', tenantConfig.credentials.clientId);
+
+  // Inject configured redirect_uri if available
+  if (tenantConfig.credentials.redirectUri) {
+    authUrl.searchParams.set('redirect_uri', tenantConfig.credentials.redirectUri);
+  } else if (oauthParams.redirect_uri) {
+    // Fall back to client-provided redirect_uri
+    authUrl.searchParams.set('redirect_uri', String(oauthParams.redirect_uri));
+  }
 
   // Set our encoded state
   authUrl.searchParams.set('state', newState);

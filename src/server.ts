@@ -108,10 +108,34 @@ app.get('/health', (_req: Request, res: Response) => {
 
 /**
  * OAuth2 Authorization Server Metadata (RFC 8414) - Root level
- * When accessed from root, we need the full MCP path in the request
+ * Extract tenant from resource query parameter if provided
  */
-app.get('/.well-known/oauth-authorization-server', validateOrigin, (_req: Request, res: Response) => {
-  // Default response - client should specify tenant in the resource path
+app.get('/.well-known/oauth-authorization-server', validateOrigin, (req: Request, res: Response) => {
+  // Check if resource parameter contains tenant info (e.g., .../mcp/riccardo-lr-test)
+  const resourceParam = req.query.resource as string | undefined;
+
+  if (resourceParam) {
+    // Try to extract tenant from resource URL
+    const match = resourceParam.match(/\/mcp\/([^/?]+)/);
+    if (match) {
+      const tenant = match[1];
+      const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
+      res.json({
+        issuer: baseUrl,
+        authorization_endpoint: `${baseUrl}/oauth2/authorize`,
+        token_endpoint: `${baseUrl}/oauth2/token`,
+        scopes_supported: ['api'],
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
+        code_challenge_methods_supported: ['S256'],
+        token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+      });
+      return;
+    }
+  }
+
+  // Default response with {tenant} placeholder - client should provide resource parameter
   res.json({
     issuer: appConfig.server.publicUrl,
     authorization_endpoint: `${appConfig.server.publicUrl}/mcp/{tenant}/oauth2/authorize`,
@@ -125,9 +149,51 @@ app.get('/.well-known/oauth-authorization-server', validateOrigin, (_req: Reques
 });
 
 /**
- * OAuth2 Protected Resource Metadata (RFC 9728) - Root level
+ * OAuth2 Authorization Server Metadata - Inspector appends path pattern
+ * Path: /.well-known/oauth-authorization-server/mcp/:tenant
  */
-app.get('/.well-known/oauth-protected-resource', validateOrigin, (_req: Request, res: Response) => {
+app.get('/.well-known/oauth-authorization-server/mcp/:tenant', validateOrigin, (req: Request, res: Response) => {
+  const tenant = req.params.tenant;
+  const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
+  res.json({
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/oauth2/authorize`,
+    token_endpoint: `${baseUrl}/oauth2/token`,
+    scopes_supported: ['api'],
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
+    code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+  });
+});
+
+/**
+ * OAuth2 Protected Resource Metadata (RFC 9728) - Root level
+ * Extract tenant from resource query parameter if provided
+ */
+app.get('/.well-known/oauth-protected-resource', validateOrigin, (req: Request, res: Response) => {
+  // Check if resource parameter contains tenant info (e.g., .../mcp/riccardo-lr-test)
+  const resourceParam = req.query.resource as string | undefined;
+
+  if (resourceParam) {
+    // Try to extract tenant from resource URL
+    const match = resourceParam.match(/\/mcp\/([^/?]+)/);
+    if (match) {
+      const tenant = match[1];
+      const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
+      res.json({
+        resource: baseUrl,
+        authorization_servers: [baseUrl],
+        bearer_methods_supported: ['header'],
+        resource_documentation: `${appConfig.server.publicUrl}/docs`,
+      });
+      return;
+    }
+  }
+
+  // Default response without tenant info
   res.json({
     resource: appConfig.server.publicUrl,
     authorization_servers: [appConfig.server.publicUrl],
@@ -138,11 +204,15 @@ app.get('/.well-known/oauth-protected-resource', validateOrigin, (_req: Request,
 
 /**
  * Inspector tries weird path patterns - handle them
+ * Return tenant-specific metadata when accessed via /.well-known/oauth-protected-resource/mcp/:tenant
  */
-app.get('/.well-known/oauth-protected-resource/mcp/:tenant', validateOrigin, (_req: Request, res: Response) => {
+app.get('/.well-known/oauth-protected-resource/mcp/:tenant', validateOrigin, (req: Request, res: Response) => {
+  const tenant = req.params.tenant;
+  const baseUrl = `${appConfig.server.publicUrl}/mcp/${tenant}`;
+
   res.json({
-    resource: appConfig.server.publicUrl,
-    authorization_servers: [appConfig.server.publicUrl],
+    resource: baseUrl,
+    authorization_servers: [baseUrl],
     bearer_methods_supported: ['header'],
     resource_documentation: `${appConfig.server.publicUrl}/docs`,
   });
@@ -185,6 +255,15 @@ app.get('/mcp/:tenant/.well-known/oauth-protected-resource', validateOrigin, (re
 });
 
 /**
+ * OAuth2 Authorization endpoint - Fallback for {tenant} placeholder
+ * When Inspector uses literal {tenant} from discovery, extract from resource parameter
+ */
+app.get('/mcp/{tenant}/oauth2/authorize', validateOrigin, async (req: Request, res: Response) => {
+  // Tenant will be extracted from resource parameter in handleAuthorize
+  await handleAuthorize(req, res);
+});
+
+/**
  * OAuth2 Authorization endpoint (proxy to Docebo) - Tenant-specific
  * Path: /mcp/:tenant/oauth2/authorize
  */
@@ -202,6 +281,83 @@ app.post('/mcp/:tenant/oauth2/token', validateOrigin, async (req: Request, res: 
   // Add tenant from path to query params for handleToken
   req.query.tenant = req.params.tenant;
   await handleToken(req, res);
+});
+
+/**
+ * OAuth2 Callback endpoint
+ * Path: /oauth/callback
+ * Receives authorization code from Docebo and displays it or forwards to client
+ */
+app.get('/oauth/callback', validateOrigin, (req: Request, res: Response) => {
+  const { code, state, error, error_description } = req.query;
+
+  if (error) {
+    res.status(400).send(`
+      <html>
+        <body>
+          <h1>OAuth Error</h1>
+          <p><strong>Error:</strong> ${error}</p>
+          <p><strong>Description:</strong> ${error_description || 'No description provided'}</p>
+        </body>
+      </html>
+    `);
+    return;
+  }
+
+  if (!code || !state) {
+    res.status(400).send(`
+      <html>
+        <body>
+          <h1>Invalid Callback</h1>
+          <p>Missing required parameters: code or state</p>
+        </body>
+      </html>
+    `);
+    return;
+  }
+
+  // Display the authorization code and state for the user to copy
+  res.send(`
+    <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+          h1 { color: #333; }
+          .code-box { background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; word-break: break-all; }
+          .label { font-weight: bold; color: #666; }
+          button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+          button:hover { background: #45a049; }
+        </style>
+      </head>
+      <body>
+        <h1>OAuth Authorization Successful!</h1>
+        <p>You have successfully authorized the application. Use the following information:</p>
+
+        <div class="code-box">
+          <div class="label">Authorization Code:</div>
+          <div id="code">${code}</div>
+          <button onclick="copyToClipboard('code')">Copy Code</button>
+        </div>
+
+        <div class="code-box">
+          <div class="label">State:</div>
+          <div id="state">${state}</div>
+          <button onclick="copyToClipboard('state')">Copy State</button>
+        </div>
+
+        <p>You can now close this window and return to the application.</p>
+
+        <script>
+          function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+              alert('Copied to clipboard!');
+            });
+          }
+        </script>
+      </body>
+    </html>
+  `);
 });
 
 /**

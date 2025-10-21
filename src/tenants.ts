@@ -6,6 +6,7 @@
 export interface TenantCredentials {
   clientId: string;
   clientSecret: string;
+  redirectUri?: string;
 }
 
 export interface TenantConfig {
@@ -16,11 +17,12 @@ export interface TenantConfig {
 
 /**
  * Get tenant credentials from environment variables
- * Format: TENANT_<UPPERCASE_TENANT>_CLIENT_ID and TENANT_<UPPERCASE_TENANT>_CLIENT_SECRET
+ * Format: TENANT_<UPPERCASE_TENANT>_CLIENT_ID, CLIENT_SECRET, and optional REDIRECT_URI
  *
  * Example:
  *   TENANT_RICCARDO_LR_TEST_CLIENT_ID=my-client
  *   TENANT_RICCARDO_LR_TEST_CLIENT_SECRET=secret123
+ *   TENANT_RICCARDO_LR_TEST_REDIRECT_URI=https://example.com/oauth/callback
  */
 export function getTenantCredentials(tenantId: string): TenantCredentials | null {
   // Convert tenant ID to environment variable format
@@ -29,6 +31,7 @@ export function getTenantCredentials(tenantId: string): TenantCredentials | null
 
   const clientId = process.env[`TENANT_${envKey}_CLIENT_ID`];
   const clientSecret = process.env[`TENANT_${envKey}_CLIENT_SECRET`];
+  const redirectUri = process.env[`TENANT_${envKey}_REDIRECT_URI`];
 
   if (!clientId || !clientSecret) {
     console.warn(`[Tenants] No credentials found for tenant: ${tenantId}`);
@@ -38,6 +41,7 @@ export function getTenantCredentials(tenantId: string): TenantCredentials | null
   return {
     clientId,
     clientSecret,
+    redirectUri,
   };
 }
 
