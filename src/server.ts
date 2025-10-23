@@ -7,6 +7,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { appConfig } from './config.js';
 import { handleMcpRequest } from './mcp.js';
 import { handleAuthorize, handleToken } from './oauth-proxy.js';
+import { initializeStorage, registerVirtualClient } from './virtual-clients.js';
 
 const app = express();
 
@@ -230,6 +231,7 @@ app.get('/mcp/:tenant/.well-known/oauth-authorization-server', validateOrigin, (
     issuer: baseUrl,
     authorization_endpoint: `${baseUrl}/oauth2/authorize`,
     token_endpoint: `${baseUrl}/oauth2/token`,
+    registration_endpoint: `${baseUrl}/oauth2/register`, // DCR endpoint (POC)
     scopes_supported: ['api'],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
@@ -283,6 +285,63 @@ app.post('/mcp/:tenant/oauth2/token', validateOrigin, async (req: Request, res: 
   // Add tenant from path to body for handleToken (query is read-only after parsing)
   req.body.tenant = req.params.tenant;
   await handleToken(req, res);
+});
+
+/**
+ * Dynamic Client Registration (DCR) endpoint - RFC 7591 (POC)
+ * Path: /mcp/:tenant/oauth2/register
+ *
+ * ⚠️ WARNING: This is a proof-of-concept implementation for testing only.
+ * NOT SECURE for production use.
+ *
+ * Allows MCP clients to "register" dynamically even though Docebo doesn't support DCR.
+ * The server creates virtual client credentials and maps them to real tenant credentials.
+ */
+app.post('/mcp/:tenant/oauth2/register', validateOrigin, (req: Request, res: Response) => {
+  const tenant = req.params.tenant;
+  console.log(`[DCR] Registration request for tenant: ${tenant}`);
+
+  try {
+    // Extract client metadata from request body
+    const { client_name, redirect_uris, grant_types, response_types, scope } = req.body;
+
+    console.log(`[DCR] Client metadata:`, {
+      client_name,
+      redirect_uris,
+      grant_types,
+      response_types,
+      scope
+    });
+
+    // Register virtual client
+    const { clientId, clientSecret } = registerVirtualClient(
+      tenant,
+      client_name,
+      redirect_uris
+    );
+
+    // Return RFC 7591 compliant response
+    const response = {
+      client_id: clientId,
+      client_secret: clientSecret,
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      // client_secret_expires_at: 0, // Never expires in this POC
+      client_name: client_name || 'MCP Client',
+      redirect_uris: redirect_uris || [],
+      grant_types: grant_types || ['authorization_code', 'refresh_token'],
+      response_types: response_types || ['code'],
+      token_endpoint_auth_method: 'client_secret_post'
+    };
+
+    console.log(`[DCR] Successfully registered virtual client: ${clientId}`);
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('[DCR] Registration error:', error);
+    res.status(500).json({
+      error: 'server_error',
+      error_description: 'Failed to register client',
+    });
+  }
 });
 
 /**
@@ -478,6 +537,9 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
  * Start server
  */
 const port = appConfig.server.port;
+
+// Initialize virtual client storage
+initializeStorage();
 
 app.listen(port, () => {
   console.log('='.repeat(60));

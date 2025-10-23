@@ -127,6 +127,92 @@ For each tenant, create an OAuth2 app in Docebo:
 5. Save and copy the Client ID and Client Secret
 6. Add to `.env` file using format above
 
+## Dynamic Client Registration (DCR) - POC Implementation
+
+⚠️ **WARNING: This is a proof-of-concept implementation for testing only. NOT SECURE for production use.**
+
+This server implements a **virtual DCR layer** that allows OAuth clients (like MCP Inspector, ChatGPT, Claude Desktop) to dynamically "register" themselves, even though Docebo doesn't natively support RFC 7591 Dynamic Client Registration.
+
+### How It Works
+
+1. **Client Registration**: MCP client calls `POST /mcp/<tenant>/oauth2/register` with client metadata
+2. **Virtual Client Creation**: Server generates a virtual `client_id` (UUID) and stores mapping in `virtual-clients.txt`
+3. **Credential Return**: Server returns virtual `client_id` and `client_secret` to the client
+4. **OAuth Flow**: Client uses virtual credentials in OAuth authorization/token requests
+5. **Credential Translation**: Server translates virtual credentials → real tenant credentials
+6. **Docebo Proxy**: All requests proxied to Docebo using real pre-configured credentials
+
+### Example DCR Flow
+
+```bash
+# 1. Register a new client
+curl -X POST 'https://abc123.ngrok.io/mcp/riccardo-lr-test/oauth2/register' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "client_name": "My MCP Client",
+    "redirect_uris": ["http://localhost:8080/callback"],
+    "grant_types": ["authorization_code", "refresh_token"],
+    "response_types": ["code"]
+  }'
+
+# Response:
+{
+  "client_id": "550e8400-e29b-41d4-a716-446655440000",
+  "client_secret": "abc123...",
+  "client_id_issued_at": 1234567890,
+  ...
+}
+
+# 2. Use virtual client_id in OAuth flow
+# The server will automatically translate to real tenant credentials
+```
+
+### Storage Format
+
+Virtual client mappings are stored in `virtual-clients.txt` (plaintext, gitignored):
+
+```
+# Format: virtual_client_id|tenant_id|created_at|client_name|redirect_uris
+550e8400-e29b-41d4-a716-446655440000|riccardo-lr-test|2025-10-22T10:00:00Z|My MCP Client|http://localhost:8080/callback
+```
+
+### Security Limitations (⚠️ POC ONLY)
+
+**DO NOT use this implementation in production.** It has serious security limitations:
+
+- ❌ **Plaintext storage**: Virtual client mappings stored in unencrypted text file
+- ❌ **No authentication**: Anyone can register a client (no API key, no validation)
+- ❌ **No rate limiting**: Vulnerable to abuse and DoS attacks
+- ❌ **No client revocation**: No way to revoke or delete virtual clients
+- ❌ **No expiration**: Virtual clients persist forever
+- ❌ **File-based storage**: Not suitable for concurrent access or multiple servers
+- ❌ **Predictable secrets**: Client secrets derived from client_id (HMAC-SHA256)
+- ❌ **No audit logging**: No tracking of who registered what
+- ❌ **No client management**: No API to list, update, or delete clients
+
+### For Production Use
+
+To use DCR in production, you would need:
+
+1. **Database storage** (PostgreSQL, MySQL, Redis)
+2. **Authentication** for registration endpoint (API keys, OAuth)
+3. **Rate limiting** and abuse prevention
+4. **Client revocation** and management APIs
+5. **Proper secret storage** (encrypted, not derived)
+6. **Audit logging** of all DCR operations
+7. **Client expiration** and cleanup mechanisms
+8. **Access controls** (who can register clients)
+9. **Monitoring and alerting**
+
+### Why This POC Exists
+
+Docebo doesn't support RFC 7591 Dynamic Client Registration. Some MCP clients (like ChatGPT, Claude Desktop) may expect DCR support. This POC allows you to **test** those clients locally without modifying them, even though Docebo doesn't support DCR natively.
+
+For production deployments, consider:
+- Pre-registering OAuth apps in Docebo manually
+- Providing static credentials to MCP clients
+- Implementing proper DCR with database backend if truly needed
+
 ## Development
 
 ### Local Development with ngrok

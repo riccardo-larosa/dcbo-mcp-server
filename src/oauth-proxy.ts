@@ -1,14 +1,71 @@
 /**
  * OAuth2 proxy endpoints
  * Proxies OAuth2 authorization and token requests to Docebo tenants
+ * Supports virtual client credentials for Dynamic Client Registration (DCR)
  */
 
 import { Request, Response } from 'express';
 import { getTenantConfig, getTenantOAuthEndpoints } from './tenants.js';
+import { lookupVirtualClient, validateVirtualClient } from './virtual-clients.js';
 
 interface OAuthState {
   tenant: string;
   original?: string; // Original state from client
+}
+
+interface ResolvedCredentials {
+  clientId: string;
+  clientSecret: string;
+  tenantId: string;
+}
+
+/**
+ * Resolve client credentials (virtual or real)
+ * If client_id is a virtual client, resolve to real tenant credentials
+ * Otherwise, use tenant credentials directly
+ */
+function resolveClientCredentials(clientId: string | undefined, tenant: string): ResolvedCredentials | null {
+  // If no client_id provided, use tenant credentials
+  if (!clientId) {
+    const tenantConfig = getTenantConfig(tenant);
+    if (!tenantConfig) return null;
+
+    return {
+      clientId: tenantConfig.credentials.clientId,
+      clientSecret: tenantConfig.credentials.clientSecret,
+      tenantId: tenant,
+    };
+  }
+
+  // Check if this is a virtual client
+  const virtualClient = lookupVirtualClient(clientId);
+
+  if (virtualClient) {
+    console.log(`[OAuth Proxy] Resolved virtual client ${clientId} to tenant ${virtualClient.tenantId}`);
+
+    // Get real tenant credentials
+    const tenantConfig = getTenantConfig(virtualClient.tenantId);
+    if (!tenantConfig) {
+      console.error(`[OAuth Proxy] Tenant ${virtualClient.tenantId} not configured for virtual client`);
+      return null;
+    }
+
+    return {
+      clientId: tenantConfig.credentials.clientId,
+      clientSecret: tenantConfig.credentials.clientSecret,
+      tenantId: virtualClient.tenantId,
+    };
+  }
+
+  // Not a virtual client, use tenant credentials
+  const tenantConfig = getTenantConfig(tenant);
+  if (!tenantConfig) return null;
+
+  return {
+    clientId: tenantConfig.credentials.clientId,
+    clientSecret: tenantConfig.credentials.clientSecret,
+    tenantId: tenant,
+  };
 }
 
 /**
@@ -161,8 +218,8 @@ export async function handleToken(req: Request, res: Response): Promise<void> {
       return;
     }
   } else if (grantType === 'refresh_token' || grantType === 'password') {
-    // For refresh_token and password grants, tenant must be in query parameter
-    tenant = req.query.tenant as string;
+    // For refresh_token and password grants, tenant can be in body or query parameter
+    tenant = req.body.tenant || req.query.tenant as string;
 
     if (!tenant) {
       res.status(400).json({
@@ -181,9 +238,21 @@ export async function handleToken(req: Request, res: Response): Promise<void> {
 
   console.log(`[OAuth Proxy] Token request for tenant: ${tenant}`);
 
-  // Get tenant configuration
-  const tenantConfig = getTenantConfig(tenant);
+  // Resolve credentials (virtual client or tenant credentials)
+  const resolvedCreds = resolveClientCredentials(req.body.client_id, tenant);
 
+  if (!resolvedCreds) {
+    res.status(404).json({
+      error: 'invalid_request',
+      error_description: `Tenant '${tenant}' is not configured`,
+    });
+    return;
+  }
+
+  // Update tenant to the resolved tenant (in case of virtual client)
+  tenant = resolvedCreds.tenantId;
+
+  const tenantConfig = getTenantConfig(tenant);
   if (!tenantConfig) {
     res.status(404).json({
       error: 'invalid_request',
@@ -208,9 +277,9 @@ export async function handleToken(req: Request, res: Response): Promise<void> {
   // Add grant type
   tokenBody.set('grant_type', grantType);
 
-  // Add tenant credentials
-  tokenBody.set('client_id', tenantConfig.credentials.clientId);
-  tokenBody.set('client_secret', tenantConfig.credentials.clientSecret);
+  // Add resolved credentials (real tenant credentials)
+  tokenBody.set('client_id', resolvedCreds.clientId);
+  tokenBody.set('client_secret', resolvedCreds.clientSecret);
 
   // Forward grant-specific parameters
   if (grantType === 'authorization_code') {

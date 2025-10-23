@@ -8,6 +8,9 @@ dist/
 .env
 .env.local
 
+# Virtual client storage (POC - contains sensitive data)
+virtual-clients.txt
+
 # Logs
 *.log
 logs/
