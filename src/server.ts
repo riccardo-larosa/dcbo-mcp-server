@@ -126,6 +126,7 @@ app.get('/.well-known/oauth-authorization-server', validateOrigin, (req: Request
         issuer: baseUrl,
         authorization_endpoint: `${baseUrl}/oauth2/authorize`,
         token_endpoint: `${baseUrl}/oauth2/token`,
+        registration_endpoint: `${baseUrl}/oauth2/register`, // DCR endpoint (POC)
         scopes_supported: ['api'],
         response_types_supported: ['code'],
         grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
@@ -141,6 +142,7 @@ app.get('/.well-known/oauth-authorization-server', validateOrigin, (req: Request
     issuer: appConfig.server.publicUrl,
     authorization_endpoint: `${appConfig.server.publicUrl}/mcp/{tenant}/oauth2/authorize`,
     token_endpoint: `${appConfig.server.publicUrl}/mcp/{tenant}/oauth2/token`,
+    registration_endpoint: `${appConfig.server.publicUrl}/mcp/{tenant}/oauth2/register`, // DCR endpoint (POC)
     scopes_supported: ['api'],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
@@ -161,6 +163,7 @@ app.get('/.well-known/oauth-authorization-server/mcp/:tenant', validateOrigin, (
     issuer: baseUrl,
     authorization_endpoint: `${baseUrl}/oauth2/authorize`,
     token_endpoint: `${baseUrl}/oauth2/token`,
+    registration_endpoint: `${baseUrl}/oauth2/register`, // DCR endpoint (POC)
     scopes_supported: ['api'],
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token', 'password'],
