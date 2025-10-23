@@ -135,22 +135,28 @@ export async function handleToken(req: Request, res: Response): Promise<void> {
   let tenant: string | null = null;
 
   if (grantType === 'authorization_code') {
-    // Extract tenant from state parameter
-    const state = req.body.state;
+    // First, check if tenant is provided in body (from tenant-specific endpoint)
+    tenant = req.body.tenant || req.query.tenant as string;
+    console.log(`[OAuth Proxy] Checking tenant from body/query: ${tenant}`);
 
-    if (state) {
-      const decodedState = decodeState(state);
-      if (decodedState) {
-        tenant = decodedState.tenant;
+    // If not in body/query, try to extract tenant from state parameter
+    if (!tenant) {
+      const state = req.body.state;
+      console.log(`[OAuth Proxy] No tenant in body/query, checking state: ${state}`);
+
+      if (state) {
+        const decodedState = decodeState(state);
+        if (decodedState) {
+          tenant = decodedState.tenant;
+        }
       }
     }
 
-    // If no state, try to extract from code (some clients don't send state in token request)
-    // For now, we'll require state
+    // If still no tenant, return error
     if (!tenant) {
       res.status(400).json({
         error: 'invalid_request',
-        error_description: 'Missing state parameter or unable to determine tenant',
+        error_description: 'Missing state parameter or unable to determine tenant. Use tenant-specific endpoint: /mcp/<tenant>/oauth2/token',
       });
       return;
     }
@@ -211,7 +217,15 @@ export async function handleToken(req: Request, res: Response): Promise<void> {
     const { code, redirect_uri, code_verifier } = req.body;
 
     if (code) tokenBody.set('code', code);
-    if (redirect_uri) tokenBody.set('redirect_uri', redirect_uri);
+    // Use tenant's configured redirect_uri instead of client's
+    // This ensures it matches what was registered in Docebo
+    if (tenantConfig.credentials.redirectUri) {
+      tokenBody.set('redirect_uri', tenantConfig.credentials.redirectUri);
+      console.log(`[OAuth Proxy] Using tenant redirect_uri: ${tenantConfig.credentials.redirectUri}`);
+    } else if (redirect_uri) {
+      tokenBody.set('redirect_uri', redirect_uri);
+      console.log(`[OAuth Proxy] Using client redirect_uri: ${redirect_uri}`);
+    }
     if (code_verifier) tokenBody.set('code_verifier', code_verifier);
   } else if (grantType === 'refresh_token') {
     const { refresh_token, scope } = req.body;

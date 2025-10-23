@@ -278,8 +278,10 @@ app.get('/mcp/:tenant/oauth2/authorize', validateOrigin, async (req: Request, re
  * Path: /mcp/:tenant/oauth2/token
  */
 app.post('/mcp/:tenant/oauth2/token', validateOrigin, async (req: Request, res: Response) => {
-  // Add tenant from path to query params for handleToken
-  req.query.tenant = req.params.tenant;
+  console.log(`[Server] POST /mcp/${req.params.tenant}/oauth2/token`);
+  console.log(`[Server] Setting req.body.tenant = ${req.params.tenant}`);
+  // Add tenant from path to body for handleToken (query is read-only after parsing)
+  req.body.tenant = req.params.tenant;
   await handleToken(req, res);
 });
 
