@@ -14,30 +14,33 @@ Multi-tenant MCP (Model Context Protocol) server that acts as an OAuth2 authoriz
 ## Architecture
 
 ```
-MCP Client (Claude, ChatGPT, etc.)
+MCP Client (Claude, ChatGPT, MCP Inspector, etc.)
     ↓
-    ↓ 1. Discovery: GET /.well-known/oauth-authorization-server
+    ↓ 1. Discovery: GET /mcp/riccardo-lr-test/.well-known/oauth-authorization-server
     ↓
 mcp.docebosaas.com (This Server)
-    ↓ Returns: authorization_endpoint, token_endpoint
+    ↓ Returns: tenant-specific endpoints
+    ↓   authorization_endpoint: /mcp/riccardo-lr-test/oauth2/authorize
+    ↓   token_endpoint: /mcp/riccardo-lr-test/oauth2/token
     ↓
-    ↓ 2. OAuth Flow: GET /oauth2/authorize?tenant=riccardo-lr-test
-    ↓ Server encodes tenant in state parameter
+    ↓ 2. OAuth Flow: GET /mcp/riccardo-lr-test/oauth2/authorize
+    ↓ Server extracts tenant from URL path
     ↓ Redirects to:
     ↓
 riccardo-lr-test.docebosaas.com/oauth2/authorize
     ↓
-    ↓ 3. User authorizes, callback with code + state
+    ↓ 3. User authorizes, callback with code
     ↓
-    ↓ 4. Token Exchange: POST /oauth2/token (with code + state)
-    ↓ Server decodes tenant from state
-    ↓ Injects tenant credentials
+    ↓ 4. Token Exchange: POST /mcp/riccardo-lr-test/oauth2/token
+    ↓ Server extracts tenant from URL path
+    ↓ Overrides redirect_uri with tenant's configured value
+    ↓ Injects tenant credentials (client_id, client_secret)
     ↓ Proxies to:
     ↓
 riccardo-lr-test.docebosaas.com/oauth2/token
     ↓ Returns access_token
     ↓
-    ↓ 5. MCP Call: POST /mcp?tenant=riccardo-lr-test
+    ↓ 5. MCP Call: POST /mcp/riccardo-lr-test
     ↓ With: Authorization: Bearer <token>
     ↓ Server calls:
     ↓
@@ -88,15 +91,20 @@ Add credentials for each Docebo tenant:
 ```env
 # Format: TENANT_{UPPERCASE_TENANT_ID}_CLIENT_ID
 #         TENANT_{UPPERCASE_TENANT_ID}_CLIENT_SECRET
+#         TENANT_{UPPERCASE_TENANT_ID}_REDIRECT_URI
 
 # Example: Tenant "riccardo-lr-test"
 TENANT_RICCARDO_LR_TEST_CLIENT_ID=my-mcp-server
 TENANT_RICCARDO_LR_TEST_CLIENT_SECRET=abc123secret...
+TENANT_RICCARDO_LR_TEST_REDIRECT_URI=https://mcp.docebosaas.com/oauth/callback
 
 # Example: Tenant "acme-corp"
 TENANT_ACME_CORP_CLIENT_ID=acme-oauth-app
 TENANT_ACME_CORP_CLIENT_SECRET=xyz789secret...
+TENANT_ACME_CORP_REDIRECT_URI=https://mcp.docebosaas.com/oauth/callback
 ```
+
+**Important**: The `REDIRECT_URI` must match what is registered in the Docebo OAuth2 app. The server will override the client's redirect_uri with this value during token exchange to ensure compatibility with MCP clients.
 
 **Note**: Tenant ID format conversion:
 - URL format: `riccardo-lr-test`
@@ -144,37 +152,38 @@ For each tenant, create an OAuth2 app in Docebo:
 
 ### MCP Client Configuration
 
-Configure MCP client (e.g., Claude Desktop) to point to your server:
+Configure MCP client (e.g., MCP Inspector) to point to your server's tenant-specific endpoint:
 
-```json
-{
-  "mcpServers": {
-    "docebo-riccardo": {
-      "url": "https://abc123.ngrok.io/mcp?tenant=riccardo-lr-test",
-      "transport": "streamable-http"
-    }
-  }
-}
+```bash
+# MCP Inspector
+npx @modelcontextprotocol/inspector \
+  --transport http \
+  --server-url https://abc123.ngrok.io/mcp/riccardo-lr-test
 ```
 
 **Key points**:
-- Include `?tenant=<tenant-id>` in the URL
-- MCP client will auto-discover OAuth2 endpoints
+- **Tenant in URL path**: `/mcp/<tenant-id>` (NOT query string)
+- MCP client will auto-discover OAuth2 endpoints from `/mcp/<tenant-id>/.well-known/oauth-authorization-server`
 - Client will handle full OAuth2 flow automatically
+- Each tenant has its own isolated MCP endpoint
+
+**Note**: Claude Desktop currently only supports stdio transport (not HTTP), so it cannot connect to this server yet. Use MCP Inspector for testing.
 
 ## API Endpoints
 
+All endpoints are tenant-specific and include the tenant ID in the URL path.
+
 ### Discovery Endpoints
 
-#### `GET /.well-known/oauth-authorization-server` (RFC 8414)
+#### `GET /mcp/<tenant-id>/.well-known/oauth-authorization-server` (RFC 8414)
 
-Returns OAuth2 authorization server metadata:
+Returns OAuth2 authorization server metadata for a specific tenant:
 
 ```json
 {
-  "issuer": "https://mcp.docebosaas.com",
-  "authorization_endpoint": "https://mcp.docebosaas.com/oauth2/authorize",
-  "token_endpoint": "https://mcp.docebosaas.com/oauth2/token",
+  "issuer": "https://mcp.docebosaas.com/mcp/riccardo-lr-test",
+  "authorization_endpoint": "https://mcp.docebosaas.com/mcp/riccardo-lr-test/oauth2/authorize",
+  "token_endpoint": "https://mcp.docebosaas.com/mcp/riccardo-lr-test/oauth2/token",
   "scopes_supported": ["api"],
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token", "password"],
@@ -182,54 +191,58 @@ Returns OAuth2 authorization server metadata:
 }
 ```
 
-#### `GET /.well-known/oauth-protected-resource` (RFC 9728)
+#### `GET /mcp/<tenant-id>/.well-known/oauth-protected-resource` (RFC 9728)
 
-Returns protected resource metadata:
+Returns protected resource metadata for a specific tenant:
 
 ```json
 {
-  "resource": "https://mcp.docebosaas.com",
-  "authorization_servers": ["https://mcp.docebosaas.com"],
-  "bearer_methods_supported": ["header"]
+  "resource": "https://mcp.docebosaas.com/mcp/riccardo-lr-test",
+  "authorization_servers": ["https://mcp.docebosaas.com/mcp/riccardo-lr-test"]
 }
 ```
 
 ### OAuth2 Endpoints
 
-#### `GET /oauth2/authorize?tenant=<tenant-id>&...`
+#### `GET /mcp/<tenant-id>/oauth2/authorize`
 
 Proxies OAuth2 authorization request to Docebo tenant.
 
-**Required parameters**:
-- `tenant`: Docebo tenant ID (e.g., `riccardo-lr-test`)
+**Parameters**:
 - Standard OAuth2 parameters: `client_id`, `response_type`, `redirect_uri`, `scope`, `state`, `code_challenge`, etc.
+- Tenant ID is extracted from URL path (NOT query string)
 
 **Flow**:
-1. Server encodes tenant into state parameter
+1. Server extracts tenant from URL path
 2. Redirects to `https://{tenant}.docebosaas.com/oauth2/authorize`
 3. User authorizes in Docebo
-4. Docebo redirects back with `code` and encoded `state`
+4. Docebo redirects back with authorization `code`
 
-#### `POST /oauth2/token`
+#### `POST /mcp/<tenant-id>/oauth2/token`
 
 Proxies OAuth2 token request to Docebo tenant.
 
-**Supported grant types**:
-- `authorization_code`: Requires `state` parameter with tenant info
-- `refresh_token`: Requires `?tenant=<id>` query parameter
-- `password`: Requires `?tenant=<id>` query parameter
+**Body parameters** (application/x-www-form-urlencoded):
+- `grant_type`: `authorization_code`, `refresh_token`, or `password`
+- `code`: Authorization code (for `authorization_code` grant)
+- `redirect_uri`: Client's redirect URI (server overrides with tenant's configured value)
+- `code_verifier`: PKCE verifier (optional)
+- Other grant-specific parameters
 
 **Flow**:
-1. Server extracts tenant from state or query
-2. Injects tenant's client_id and client_secret
-3. Proxies to `https://{tenant}.docebosaas.com/oauth2/token`
-4. Returns token response to client
+1. Server extracts tenant from URL path
+2. Overrides `redirect_uri` with tenant's configured value
+3. Injects tenant's `client_id` and `client_secret`
+4. Proxies to `https://{tenant}.docebosaas.com/oauth2/token`
+5. Returns token response to client
+
+**Important**: The server automatically overrides the `redirect_uri` parameter with the tenant's configured `REDIRECT_URI` to ensure it matches what's registered in Docebo.
 
 ### MCP Endpoint
 
-#### `POST /mcp?tenant=<tenant-id>`
+#### `POST /mcp/<tenant-id>`
 
-MCP JSON-RPC endpoint.
+MCP JSON-RPC endpoint for a specific tenant.
 
 **Headers**:
 - `Authorization: Bearer <access_token>`
@@ -275,25 +288,31 @@ curl https://abc123.ngrok.io/.well-known/oauth-authorization-server | jq .
 
 ### Test OAuth2 Flow (Manual)
 
-1. **Start authorization**:
-   ```
-   https://abc123.ngrok.io/oauth2/authorize?tenant=riccardo-lr-test&client_id=test&response_type=code&redirect_uri=http://localhost:3000/callback&scope=api
+1. **Test discovery endpoint**:
+   ```bash
+   curl https://abc123.ngrok.io/mcp/riccardo-lr-test/.well-known/oauth-authorization-server | jq .
    ```
 
-2. **Exchange code for token** (after authorization):
+2. **Start authorization** (paste this URL in browser):
+   ```
+   https://abc123.ngrok.io/mcp/riccardo-lr-test/oauth2/authorize?client_id=test&response_type=code&redirect_uri=https://abc123.ngrok.io/oauth/callback&scope=api&code_challenge=CHALLENGE&code_challenge_method=S256
+   ```
+
+3. **Exchange code for token** (after authorization):
    ```bash
-   curl -X POST https://abc123.ngrok.io/oauth2/token \
+   curl -X POST https://abc123.ngrok.io/mcp/riccardo-lr-test/oauth2/token \
+     -H 'Content-Type: application/x-www-form-urlencoded' \
      -d "grant_type=authorization_code" \
      -d "code=<authorization_code>" \
-     -d "redirect_uri=http://localhost:3000/callback" \
-     -d "state=<state_from_callback>"
+     -d "code_verifier=<verifier>" \
+     -d "redirect_uri=https://abc123.ngrok.io/oauth/callback"
    ```
 
-3. **Call MCP endpoint**:
+4. **Call MCP endpoint**:
    ```bash
-   TOKEN="<access_token_from_step_2>"
+   TOKEN="<access_token_from_step_3>"
 
-   curl -X POST "https://abc123.ngrok.io/mcp?tenant=riccardo-lr-test" \
+   curl -X POST "https://abc123.ngrok.io/mcp/riccardo-lr-test" \
      -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
      -d '{
@@ -382,6 +401,7 @@ Credentials are stored in environment variables with naming convention:
 ```
 TENANT_{TENANT_ID_UPPERCASE_WITH_UNDERSCORES}_CLIENT_ID
 TENANT_{TENANT_ID_UPPERCASE_WITH_UNDERSCORES}_CLIENT_SECRET
+TENANT_{TENANT_ID_UPPERCASE_WITH_UNDERSCORES}_REDIRECT_URI
 ```
 
 Conversion examples:
@@ -389,21 +409,26 @@ Conversion examples:
 - `acme-corp` → `TENANT_ACME_CORP_CLIENT_ID`
 - `test-123` → `TENANT_TEST_123_CLIENT_ID`
 
-### State Parameter Encoding
+**Important**: Each tenant must have all three values configured:
+1. `CLIENT_ID` - OAuth2 client ID from Docebo
+2. `CLIENT_SECRET` - OAuth2 client secret from Docebo
+3. `REDIRECT_URI` - The redirect URI registered in Docebo OAuth2 app
 
-The server encodes tenant information in the OAuth2 `state` parameter:
+The `REDIRECT_URI` is automatically injected during token exchange, overriding whatever the MCP client sends. This ensures compatibility with MCP clients that may send different redirect URIs (e.g., MCP Inspector sends `http://localhost:6274/oauth/callback/debug`).
 
-```typescript
-{
-  tenant: "riccardo-lr-test",
-  original: "<client_original_state>"
-}
-```
+### Tenant Detection from URL Path
 
-Encoded as base64url JSON. This allows the server to:
-1. Route token requests to correct tenant
-2. Inject correct credentials
-3. Preserve client's original state
+The server extracts the tenant ID from the URL path for all endpoints:
+
+- `/mcp/<tenant-id>` → Tenant ID extracted from path
+- `/mcp/<tenant-id>/oauth2/authorize` → Tenant ID extracted from path
+- `/mcp/<tenant-id>/oauth2/token` → Tenant ID extracted from path
+
+No query string parameters required. The tenant is added to `req.body.tenant` before passing to the OAuth proxy, which then:
+1. Loads tenant configuration
+2. Injects tenant credentials
+3. Overrides redirect_uri with tenant's configured value
+4. Proxies request to Docebo
 
 ### File Structure
 
