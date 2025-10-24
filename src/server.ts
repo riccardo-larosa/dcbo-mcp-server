@@ -283,8 +283,16 @@ app.get('/mcp/:tenant/oauth2/authorize', validateOrigin, async (req: Request, re
  * Path: /mcp/:tenant/oauth2/token
  */
 app.post('/mcp/:tenant/oauth2/token', validateOrigin, async (req: Request, res: Response) => {
-  console.log(`[Server] POST /mcp/${req.params.tenant}/oauth2/token`);
-  console.log(`[Server] Setting req.body.tenant = ${req.params.tenant}`);
+  console.log(`[Token] ===== Token Request Started =====`);
+  console.log(`[Token] POST /mcp/${req.params.tenant}/oauth2/token`);
+  console.log(`[Token] Headers:`, {
+    'content-type': req.headers['content-type'],
+    'authorization': req.headers['authorization'] ? '[REDACTED]' : undefined,
+    'user-agent': req.headers['user-agent'],
+    'origin': req.headers['origin']
+  });
+  console.log(`[Token] Request Body:`, JSON.stringify(req.body, null, 2));
+  console.log(`[Token] Setting req.body.tenant = ${req.params.tenant}`);
   // Add tenant from path to body for handleToken (query is read-only after parsing)
   req.body.tenant = req.params.tenant;
   await handleToken(req, res);
