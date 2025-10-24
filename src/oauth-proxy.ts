@@ -11,6 +11,7 @@ import { lookupVirtualClient, validateVirtualClient } from './virtual-clients.js
 interface OAuthState {
   tenant: string;
   original?: string; // Original state from client
+  redirectUri?: string; // Client's redirect_uri for callback
 }
 
 interface ResolvedCredentials {
@@ -71,18 +72,20 @@ function resolveClientCredentials(clientId: string | undefined, tenant: string):
 /**
  * Encode tenant info into OAuth state parameter
  */
-function encodeState(tenant: string, originalState?: string): string {
+function encodeState(tenant: string, originalState?: string, redirectUri?: string): string {
   const stateObj: OAuthState = {
     tenant,
     original: originalState,
+    redirectUri,
   };
   return Buffer.from(JSON.stringify(stateObj)).toString('base64url');
 }
 
 /**
  * Decode tenant info from OAuth state parameter
+ * Exported for use in callback handler
  */
-function decodeState(encodedState: string): OAuthState | null {
+export function decodeState(encodedState: string): OAuthState | null {
   try {
     const decoded = Buffer.from(encodedState, 'base64url').toString('utf-8');
     return JSON.parse(decoded) as OAuthState;
@@ -143,9 +146,10 @@ export async function handleAuthorize(req: Request, res: Response): Promise<void
     return;
   }
 
-  // Encode tenant into state parameter
+  // Encode tenant and client's redirect_uri into state parameter
   const originalState = oauthParams.state as string | undefined;
-  const newState = encodeState(tenant, originalState);
+  const clientRedirectUri = oauthParams.redirect_uri as string | undefined;
+  const newState = encodeState(tenant, originalState, clientRedirectUri);
 
   // Build authorization URL for Docebo
   const authUrl = new URL(tenantEndpoints.authorizationUrl);

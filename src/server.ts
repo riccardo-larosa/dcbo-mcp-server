@@ -6,7 +6,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { appConfig } from './config.js';
 import { handleMcpRequest } from './mcp.js';
-import { handleAuthorize, handleToken } from './oauth-proxy.js';
+import { handleAuthorize, handleToken, decodeState } from './oauth-proxy.js';
 import { initializeStorage, registerVirtualClient } from './virtual-clients.js';
 
 const app = express();
@@ -363,11 +363,17 @@ app.post('/mcp/:tenant/oauth2/register', validateOrigin, (req: Request, res: Res
 /**
  * OAuth2 Callback endpoint
  * Path: /oauth/callback
- * Receives authorization code from Docebo and displays it or forwards to client
+ * Receives authorization code from Docebo and redirects to client's redirect_uri
  */
 app.get('/oauth/callback', validateOrigin, (req: Request, res: Response) => {
   const { code, state, error, error_description } = req.query;
 
+  console.log(`[OAuth Callback] Received callback from Docebo`);
+  console.log(`[OAuth Callback] Code: ${code ? '[PRESENT]' : '[MISSING]'}`);
+  console.log(`[OAuth Callback] State: ${state ? String(state).substring(0, 50) + '...' : '[MISSING]'}`);
+  console.log(`[OAuth Callback] Error: ${error || 'none'}`);
+
+  // Handle OAuth errors
   if (error) {
     res.status(400).send(`
       <html>
@@ -393,7 +399,50 @@ app.get('/oauth/callback', validateOrigin, (req: Request, res: Response) => {
     return;
   }
 
-  // Display the authorization code and state for the user to copy
+  // Decode state to get original state and redirect_uri
+  const decodedState = decodeState(String(state));
+
+  if (!decodedState) {
+    console.error('[OAuth Callback] Failed to decode state');
+    res.status(400).send(`
+      <html>
+        <body>
+          <h1>Invalid State Parameter</h1>
+          <p>Unable to decode state parameter</p>
+        </body>
+      </html>
+    `);
+    return;
+  }
+
+  console.log(`[OAuth Callback] Decoded state:`, {
+    tenant: decodedState.tenant,
+    hasOriginalState: !!decodedState.original,
+    hasRedirectUri: !!decodedState.redirectUri
+  });
+
+  // If client provided a redirect_uri, redirect back to them
+  if (decodedState.redirectUri) {
+    const redirectUrl = new URL(decodedState.redirectUri);
+    redirectUrl.searchParams.set('code', String(code));
+
+    // Use original state if available, otherwise use decoded state
+    if (decodedState.original) {
+      redirectUrl.searchParams.set('state', decodedState.original);
+      console.log(`[OAuth Callback] Redirecting to client with original state: ${decodedState.original}`);
+    } else {
+      redirectUrl.searchParams.set('state', String(state));
+      console.log(`[OAuth Callback] Redirecting to client with encoded state`);
+    }
+
+    console.log(`[OAuth Callback] Redirecting to: ${redirectUrl.origin}${redirectUrl.pathname}`);
+    res.redirect(redirectUrl.toString());
+    return;
+  }
+
+  // Fallback: Display the authorization code and state for manual copy
+  // (for clients that don't provide redirect_uri, like manual testing)
+  console.log(`[OAuth Callback] No redirect_uri found, displaying code to user`);
   res.send(`
     <html>
       <head>
@@ -418,7 +467,7 @@ app.get('/oauth/callback', validateOrigin, (req: Request, res: Response) => {
 
         <div class="code-box">
           <div class="label">State:</div>
-          <div id="state">${state}</div>
+          <div id="state">${decodedState.original || state}</div>
           <button onclick="copyToClipboard('state')">Copy State</button>
         </div>
 
