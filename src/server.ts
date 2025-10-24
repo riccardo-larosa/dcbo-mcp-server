@@ -302,13 +302,26 @@ app.post('/mcp/:tenant/oauth2/token', validateOrigin, async (req: Request, res: 
  */
 app.post('/mcp/:tenant/oauth2/register', validateOrigin, (req: Request, res: Response) => {
   const tenant = req.params.tenant;
-  console.log(`[DCR] Registration request for tenant: ${tenant}`);
+  console.log(`[DCR] ===== Registration Request Started =====`);
+  console.log(`[DCR] Tenant: ${tenant}`);
+  console.log(`[DCR] Method: ${req.method}`);
+  console.log(`[DCR] URL: ${req.url}`);
+  console.log(`[DCR] Path Params:`, req.params);
+  console.log(`[DCR] Query String:`, req.query);
+  console.log(`[DCR] Headers:`, {
+    'content-type': req.headers['content-type'],
+    'authorization': req.headers['authorization'] ? '[REDACTED]' : undefined,
+    'user-agent': req.headers['user-agent'],
+    'origin': req.headers['origin'],
+    'referer': req.headers['referer']
+  });
+  console.log(`[DCR] Request Body (full):`, JSON.stringify(req.body, null, 2));
 
   try {
     // Extract client metadata from request body
     const { client_name, redirect_uris, grant_types, response_types, scope } = req.body;
 
-    console.log(`[DCR] Client metadata:`, {
+    console.log(`[DCR] Parsed Client Metadata:`, {
       client_name,
       redirect_uris,
       grant_types,
