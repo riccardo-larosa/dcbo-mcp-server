@@ -166,17 +166,24 @@ export async function handleAuthorize(req: Request, res: Response): Promise<void
   authUrl.searchParams.set('client_id', tenantConfig.credentials.clientId);
 
   // Inject configured redirect_uri if available
+  console.log(`[OAuth Proxy] Tenant config redirect_uri: ${tenantConfig.credentials.redirectUri || 'NOT SET'}`);
+  console.log(`[OAuth Proxy] Client provided redirect_uri: ${oauthParams.redirect_uri || 'NOT SET'}`);
+
   if (tenantConfig.credentials.redirectUri) {
     authUrl.searchParams.set('redirect_uri', tenantConfig.credentials.redirectUri);
+    console.log(`[OAuth Proxy] Using tenant redirect_uri: ${tenantConfig.credentials.redirectUri}`);
   } else if (oauthParams.redirect_uri) {
     // Fall back to client-provided redirect_uri
     authUrl.searchParams.set('redirect_uri', String(oauthParams.redirect_uri));
+    console.log(`[OAuth Proxy] Using client redirect_uri: ${oauthParams.redirect_uri}`);
+  } else {
+    console.log(`[OAuth Proxy] WARNING: No redirect_uri set!`);
   }
 
   // Set our encoded state
   authUrl.searchParams.set('state', newState);
 
-  console.log(`[OAuth Proxy] Redirecting to: ${authUrl.origin}${authUrl.pathname}`);
+  console.log(`[OAuth Proxy] Full redirect URL: ${authUrl.toString()}`);
 
   // Redirect to Docebo's authorization endpoint
   res.redirect(authUrl.toString());
