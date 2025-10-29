@@ -56,7 +56,7 @@ const ERROR_CODES = {
  */
 const TOOLS: ToolDefinition[] = [
   {
-    name: 'docebo.list_users',
+    name: 'docebo_list_users',
     description: 'List users from Docebo LMS. Returns paginated user data.',
     inputSchema: {
       type: 'object',
@@ -149,7 +149,7 @@ export async function handleMcpRequest(request: JsonRpcRequest, bearerToken: str
         }
 
         // Route to tool handler
-        if (params.name === 'docebo.list_users') {
+        if (params.name === 'docebo_list_users') {
           const toolArgs = (params.arguments as ListUsersParams) || {};
           const result = await listUsers(toolArgs, bearerToken, tenant);
 
