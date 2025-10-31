@@ -3,7 +3,7 @@
  * Implements minimal MCP protocol with one tool: docebo.list_users
  */
 
-import { listUsers, ListUsersParams } from './docebo.js';
+import { listUsers, ListUsersParams, harmonySearch, HarmonySearchParams } from './docebo.js';
 
 // JSON-RPC types
 interface JsonRpcRequest {
@@ -85,6 +85,20 @@ const TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'docebo_harmony_search',
+    description: 'Search Docebo Learning Management System',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query text',
+        },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 /**
@@ -152,6 +166,24 @@ export async function handleMcpRequest(request: JsonRpcRequest, bearerToken: str
         if (params.name === 'docebo_list_users') {
           const toolArgs = (params.arguments as ListUsersParams) || {};
           const result = await listUsers(toolArgs, bearerToken, tenant);
+
+          return {
+            jsonrpc: '2.0',
+            id: requestId,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            },
+          };
+        }
+
+        if (params.name === 'docebo_harmony_search') {
+          const toolArgs = (params.arguments as HarmonySearchParams) || { query: '' };
+          const result = await harmonySearch(toolArgs, bearerToken, tenant);
 
           return {
             jsonrpc: '2.0',

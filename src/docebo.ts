@@ -76,3 +76,42 @@ export async function listUsers(params: ListUsersParams = {}, bearerToken: strin
 
   return data;
 }
+
+export interface HarmonySearchParams {
+  query: string;
+}
+
+export interface HarmonySearchResponse {
+  // TODO: Define response structure once API details are provided
+  [key: string]: unknown;
+}
+
+/**
+ * Search Docebo using Harmony Search (RAG)
+ * This function will call 2-3 APIs to retrieve comprehensive search results
+ *
+ * TODO: Implement API calls once endpoint details are provided
+ */
+export async function harmonySearch(params: HarmonySearchParams, bearerToken: string, tenant: string): Promise<HarmonySearchResponse> {
+  // Get tenant API URL
+  const baseUrl = getTenantApiUrl(tenant);
+
+  if (!baseUrl) {
+    throw new Error(`Tenant '${tenant}' is not configured`);
+  }
+
+  console.log('[Docebo] Harmony Search query:', params.query);
+
+  // TODO: Implement the following:
+  // 1. Call first API endpoint (e.g., /manage/v1/globalsearch/search)
+  // 2. Call second API endpoint with results from first
+  // 3. Call third API endpoint if needed
+  // 4. Combine and return results
+
+  // Placeholder response
+  return {
+    query: params.query,
+    results: [],
+    message: 'TODO: Implement Harmony Search API calls',
+  };
+}
