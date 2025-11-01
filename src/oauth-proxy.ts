@@ -6,7 +6,7 @@
 
 import { Request, Response } from 'express';
 import { getTenantConfig, getTenantOAuthEndpoints } from './tenants.js';
-import { lookupVirtualClient, validateVirtualClient } from './virtual-clients.js';
+import { lookupVirtualClient } from './virtual-clients.js';
 
 interface OAuthState {
   tenant: string;
