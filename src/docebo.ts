@@ -135,9 +135,6 @@ export async function harmonySearch(params: HarmonySearchParams, bearerToken: st
 
   const bootstrapData = await bootstrapResponse.json() as BootstrapResponse;
 
-  // Log the full bootstrap response for debugging
-  console.log('[Docebo] Full bootstrap response:', JSON.stringify(bootstrapData, null, 2));
-
   // Extract Geppetto URLs
   const geppettoStartUrl = bootstrapData.data.ai?.geppetto?.chat?.start_url;
   const geppettoMessageStreamUrl = bootstrapData.data.ai?.geppetto?.chat?.message_stream_url;
@@ -235,8 +232,6 @@ export async function harmonySearch(params: HarmonySearchParams, bearerToken: st
 
   // The response is Server-Sent Events (SSE) format, read as text
   const streamText = await messageStreamResponse.text();
-
-  console.log('[Docebo] Raw stream response:', streamText);
 
   // Parse SSE format to extract data
   const lines = streamText.split('\n');
