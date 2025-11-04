@@ -3,7 +3,7 @@
  * Implements minimal MCP protocol with one tool: docebo.list_users
  */
 
-import { listUsers, ListUsersParams, harmonySearch, HarmonySearchParams } from './docebo.js';
+import { listUsers, ListUsersParams, harmonySearch, HarmonySearchParams, enrollUser, EnrollUserParams } from './docebo.js';
 
 // JSON-RPC types
 interface JsonRpcRequest {
@@ -99,6 +99,42 @@ const TOOLS: ToolDefinition[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'docebo_enroll_user',
+    description: 'Enroll a user in a Docebo course. Requires user ID and course ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: {
+          type: 'number',
+          description: 'User ID (numeric)',
+        },
+        course_id: {
+          type: 'number',
+          description: 'Course ID (numeric)',
+        },
+        level: {
+          type: 'number',
+          enum: [3, 4, 6],
+          description: 'Enrollment level: 3=student (default), 4=tutor, 6=instructor',
+        },
+        assignment_type: {
+          type: 'string',
+          enum: ['mandatory', 'required', 'recommended', 'optional'],
+          description: 'Assignment type (optional)',
+        },
+        date_begin_validity: {
+          type: 'string',
+          description: 'Start date for enrollment validity (yyyy-mm-dd format, optional)',
+        },
+        date_expire_validity: {
+          type: 'string',
+          description: 'Expiration date for enrollment (yyyy-mm-dd format, optional)',
+        },
+      },
+      required: ['user_id', 'course_id'],
+    },
+  },
 ];
 
 /**
@@ -184,6 +220,36 @@ export async function handleMcpRequest(request: JsonRpcRequest, bearerToken: str
         if (params.name === 'docebo_harmony_search') {
           const toolArgs = (params.arguments as HarmonySearchParams) || { query: '' };
           const result = await harmonySearch(toolArgs, bearerToken, tenant);
+
+          return {
+            jsonrpc: '2.0',
+            id: requestId,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            },
+          };
+        }
+
+        if (params.name === 'docebo_enroll_user') {
+          const toolArgs = params.arguments as EnrollUserParams;
+
+          if (!toolArgs?.user_id || !toolArgs?.course_id) {
+            return {
+              jsonrpc: '2.0',
+              id: requestId,
+              error: {
+                code: ERROR_CODES.INVALID_PARAMS,
+                message: 'Missing required parameters: user_id and course_id',
+              },
+            };
+          }
+
+          const result = await enrollUser(toolArgs, bearerToken, tenant);
 
           return {
             jsonrpc: '2.0',

@@ -77,6 +77,26 @@ export async function listUsers(params: ListUsersParams = {}, bearerToken: strin
   return data;
 }
 
+export interface EnrollUserParams {
+  user_id: number;
+  course_id: number;
+  level?: 3 | 4 | 6; // 3=student, 4=tutor, 6=instructor
+  assignment_type?: 'mandatory' | 'required' | 'recommended' | 'optional';
+  date_begin_validity?: string; // yyyy-mm-dd format
+  date_expire_validity?: string; // yyyy-mm-dd format
+}
+
+export interface EnrollUserResponse {
+  success: boolean;
+  enrolled?: {
+    id_user: number;
+    id_course: number;
+    waiting: boolean;
+  };
+  error?: string;
+  [key: string]: unknown;
+}
+
 export interface HarmonySearchParams {
   query: string;
 }
@@ -97,6 +117,93 @@ interface BootstrapResponse {
       };
     };
     [key: string]: unknown;
+  };
+}
+
+/**
+ * Enroll a user in a Docebo course
+ */
+export async function enrollUser(
+  params: EnrollUserParams,
+  bearerToken: string,
+  tenant: string
+): Promise<EnrollUserResponse> {
+  const baseUrl = getTenantApiUrl(tenant);
+
+  if (!baseUrl) {
+    throw new Error(`Tenant '${tenant}' is not configured`);
+  }
+
+  console.log('[Docebo] Enrolling user', params.user_id, 'in course', params.course_id);
+
+  // Build enrollment request body
+  const enrollmentBody = {
+    user_ids: [params.user_id],
+    course_ids: [params.course_id],
+    level: params.level || 3, // Default to student
+    assignment_type: params.assignment_type,
+    date_begin_validity: params.date_begin_validity,
+    date_expire_validity: params.date_expire_validity,
+    consider_ef_as_optional: true, // Don't enforce additional enrollment fields
+  };
+
+  const url = `${baseUrl}/learn/v1/enrollments`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(enrollmentBody),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Docebo enrollment API error: ${response.status} ${response.statusText} - ${text}`
+    );
+  }
+
+  const data = await response.json() as {
+    data: {
+      errors?: Array<{
+        enrolled?: Array<{
+          id_user: number;
+          id_course: number;
+          waiting: boolean;
+        }>;
+      }>;
+    };
+  };
+
+  console.log('[Docebo] Enrollment response:', JSON.stringify(data, null, 2));
+
+  // Parse the response - check if enrollment was successful
+  // Note: Docebo returns enrollments in the "errors" array even on success
+  if (data.data?.errors && data.data.errors.length > 0) {
+    const firstResult = data.data.errors[0];
+
+    if (firstResult.enrolled && firstResult.enrolled.length > 0) {
+      const enrollment = firstResult.enrolled[0];
+      console.log('[Docebo] Successfully enrolled user', enrollment.id_user, 'in course', enrollment.id_course);
+
+      return {
+        success: true,
+        enrolled: enrollment,
+        rawResponse: data,
+      };
+    }
+  }
+
+  // If we get here, something went wrong
+  console.log('[Docebo] Enrollment failed or returned unexpected response');
+
+  return {
+    success: false,
+    error: 'Enrollment failed or returned unexpected response',
+    rawResponse: data,
   };
 }
 
