@@ -4,8 +4,10 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { enrollUser, listUsers, harmonySearch } from './docebo.js';
+import * as tenants from './tenants.js';
 
-// Mock fetch globally
+// Mock dependencies
+vi.mock('./tenants.js');
 global.fetch = vi.fn();
 
 describe('enrollUser', () => {
@@ -14,6 +16,10 @@ describe('enrollUser', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock tenant API URL
+    vi.mocked(tenants.getTenantApiUrl).mockReturnValue(
+      `https://${mockTenant}.docebosaas.com`
+    );
   });
 
   it('should successfully enroll a user in a course', async () => {
@@ -142,6 +148,9 @@ describe('enrollUser', () => {
   });
 
   it('should throw error for unconfigured tenant', async () => {
+    // Mock the tenant API URL to return null for invalid tenant
+    vi.mocked(tenants.getTenantApiUrl).mockReturnValue(null);
+
     await expect(
       enrollUser({ user_id: 123, course_id: 456 }, mockBearerToken, 'invalid-tenant')
     ).rejects.toThrow("Tenant 'invalid-tenant' is not configured");
@@ -184,6 +193,10 @@ describe('listUsers', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock tenant API URL
+    vi.mocked(tenants.getTenantApiUrl).mockReturnValue(
+      `https://${mockTenant}.docebosaas.com`
+    );
   });
 
   it('should list users successfully', async () => {
@@ -249,6 +262,10 @@ describe('harmonySearch', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock tenant API URL
+    vi.mocked(tenants.getTenantApiUrl).mockReturnValue(
+      `https://${mockTenant}.docebosaas.com`
+    );
   });
 
   it('should parse SSE events correctly', async () => {
